@@ -1,0 +1,2324 @@
+=== DIRECTORY STRUCTURE ===
+Package.swift
+Sources/AssetKit/Capture/AssetCaptureCoordinator.swift
+Sources/AssetKit/Capture/AssetCaptureView.swift
+Sources/AssetKit/Capture/AssetFormView.swift
+Sources/AssetKit/Capture/ConfirmRecognitionView.swift
+Sources/AssetKit/Capture/EntryPointSelectionView.swift
+Sources/AssetKit/Capture/GuidedLabelScanView.swift
+Sources/AssetKit/Capture/LabelLocationPickerView.swift
+Sources/AssetKit/Capture/ObjectRecognitionView.swift
+Sources/AssetKit/Knowledge/ApplianceKnowledge.swift
+Sources/AssetKit/Knowledge/BundledKnowledgeProvider.swift
+Sources/AssetKit/Models/LabelLocation.swift
+Sources/AssetKit/Models/LabelScanResult.swift
+Sources/AssetKit/Models/RecognitionResult.swift
+Sources/AssetKit/Models/TrainingSample.swift
+Sources/AssetKit/Services/RecognitionAPIService.swift
+Tests/AssetKitTests/AssetKitTests.swift
+
+
+=== FILE CONTENTS ===
+
+// ===== Tests/AssetKitTests/AssetKitTests.swift =====
+import Testing
+@testable import AssetKit
+
+@Test func example() async throws {
+    // Write your test here and use APIs like `#expect(...)` to check expected conditions.
+}
+
+
+// ===== Package.swift =====
+// swift-tools-version: 5.9
+import PackageDescription
+
+let package = Package(
+    name: "AssetKit",
+    platforms: [.iOS(.v17)],
+    products: [
+        .library(name: "AssetKit", targets: ["AssetKit"])
+    ],
+    dependencies: [
+        .package(path: "../CastleMindr/CastleMindrModels")
+    ],
+    targets: [
+        .target(
+            name: "AssetKit",
+            dependencies: ["CastleMindrModels"]
+        )
+    ]
+)
+
+
+// ===== Sources/AssetKit/Capture/LabelLocationPickerView.swift =====
+//
+//  LabelLocationPickerView.swift
+//  AssetKit
+//
+//  Created by Jim Bergren on 1/24/26.
+//
+
+
+import SwiftUI
+import CastleMindrModels
+
+
+/// Quick picker for label location - shown after successful OCR scan
+public struct LabelLocationPickerView: View {
+    let category: ApplianceCategory
+    let onSelect: (LabelLocation) -> Void
+    let onSkip: () -> Void
+    
+    @State private var selectedLocation: LabelLocation?
+    
+    public init(
+        category: ApplianceCategory,
+        onSelect: @escaping (LabelLocation) -> Void,
+        onSkip: @escaping () -> Void
+    ) {
+        self.category = category
+        self.onSelect = onSelect
+        self.onSkip = onSkip
+    }
+    
+    private var commonLocations: [LabelLocation] {
+        LabelLocation.commonLocations(for: category)
+    }
+    
+    public var body: some View {
+        VStack(spacing: 24) {
+            // Header
+            VStack(spacing: 8) {
+                Image(systemName: "mappin.circle.fill")
+                    .font(.system(size: 48))
+                    .foregroundStyle(.blue)
+                
+                Text("Where was the label?")
+                    .font(.title2.bold())
+                
+                Text("This helps us guide future users")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.top)
+            
+            // Location grid
+            LazyVGrid(columns: [
+                GridItem(.flexible()),
+                GridItem(.flexible())
+            ], spacing: 12) {
+                ForEach(commonLocations, id: \.self) { location in
+                    LocationButton(
+                        location: location,
+                        isSelected: selectedLocation == location
+                    ) {
+                        selectedLocation = location
+                    }
+                }
+                
+                // "Other" option if not in common
+                if !commonLocations.contains(.other) {
+                    LocationButton(
+                        location: .other,
+                        isSelected: selectedLocation == .other
+                    ) {
+                        selectedLocation = .other
+                    }
+                }
+            }
+            .padding(.horizontal)
+            
+            Spacer()
+            
+            // Actions
+            VStack(spacing: 12) {
+                Button {
+                    if let location = selectedLocation {
+                        onSelect(location)
+                    }
+                } label: {
+                    Text("Continue")
+                        .font(.headline)
+                        .frame(maxWidth: .infinity)
+                        .padding()
+                        .background(selectedLocation != nil ? Color.blue : Color.gray.opacity(0.3))
+                        .foregroundStyle(.white)
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                }
+                .disabled(selectedLocation == nil)
+                
+                Button {
+                    onSkip()
+                } label: {
+                    Text("Skip")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .padding()
+        }
+    }
+}
+
+// MARK: - Location Button
+
+private struct LocationButton: View {
+    let location: LabelLocation
+    let isSelected: Bool
+    let action: () -> Void
+    
+    var body: some View {
+        Button(action: action) {
+            VStack(spacing: 8) {
+                Image(systemName: location.iconName)
+                    .font(.title2)
+                
+                Text(location.displayName)
+                    .font(.caption)
+                    .multilineTextAlignment(.center)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 16)
+            .background(isSelected ? Color.blue.opacity(0.15) : Color(.systemGray6))
+            .foregroundStyle(isSelected ? .blue : .primary)
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+            .overlay(
+                RoundedRectangle(cornerRadius: 12)
+                    .stroke(isSelected ? Color.blue : Color.clear, lineWidth: 2)
+            )
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+// MARK: - Preview
+
+#Preview {
+    LabelLocationPickerView(
+        category: .refrigerator,
+        onSelect: { location in
+            print("Selected: \(location)")
+        },
+        onSkip: {
+            print("Skipped")
+        }
+    )
+}
+
+
+// ===== Sources/AssetKit/Capture/ConfirmRecognitionView.swift =====
+//
+//  ConfirmRecognitionView.swift
+//  AssetKit
+//
+//  Created by Jim Bergren on 1/23/26.
+//
+
+
+import SwiftUI
+import CastleMindrModels
+
+public struct ConfirmRecognitionView: View {
+    let result: RecognitionResult
+    let onConfirm: (RecognitionResult) -> Void
+    let onRetry: () -> Void
+    let onSkipToForm: () -> Void
+    
+    @EnvironmentObject private var knowledgeBase: ApplianceKnowledgeBase
+    @State private var selectedCategory: ApplianceCategory
+    @State private var selectedManufacturer: String
+    @State private var showCategoryPicker = false
+    @State private var showManufacturerPicker = false
+    
+    public init(
+        result: RecognitionResult,
+        onConfirm: @escaping (RecognitionResult) -> Void,
+        onRetry: @escaping () -> Void,
+        onSkipToForm: @escaping () -> Void
+    ) {
+        self.result = result
+        self.onConfirm = onConfirm
+        self.onRetry = onRetry
+        self.onSkipToForm = onSkipToForm
+        self._selectedCategory = State(initialValue: result.category)
+        self._selectedManufacturer = State(initialValue: result.manufacturer ?? "")
+    }
+    
+    private var categoryDisplayName: String {
+        knowledgeBase.knowledge(for: selectedCategory)?.displayName ?? selectedCategory.rawValue.capitalized
+    }
+    
+    public var body: some View {
+        VStack(spacing: 24) {
+            Spacer()
+            
+            // Captured image or placeholder
+            Group {
+                if let image = result.capturedImage {
+                    Image(uiImage: image)
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                } else {
+                    RoundedRectangle(cornerRadius: 12)
+                        .fill(Color(.secondarySystemBackground))
+                        .aspectRatio(4/3, contentMode: .fit)
+                        .overlay {
+                            Image(systemName: "photo")
+                                .font(.system(size: 48))
+                                .foregroundStyle(.tertiary)
+                        }
+                }
+            }
+            .frame(maxHeight: 200)
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+            .padding(.horizontal)
+            
+            Text("This looks like a:")
+                .font(.headline)
+            
+            // Category selection
+            VStack(spacing: 12) {
+                Button {
+                    showCategoryPicker = true
+                } label: {
+                    HStack {
+                        Text(categoryDisplayName)
+                            .font(.title2)
+                            .fontWeight(.semibold)
+                        Image(systemName: "chevron.down")
+                            .font(.caption)
+                    }
+                    .foregroundStyle(.primary)
+                }
+                
+                // Manufacturer if detected
+                if !selectedManufacturer.isEmpty {
+                    Button {
+                        showManufacturerPicker = true
+                    } label: {
+                        HStack {
+                            Text("by \(selectedManufacturer)")
+                                .font(.title3)
+                            Image(systemName: "chevron.down")
+                                .font(.caption2)
+                        }
+                        .foregroundStyle(.secondary)
+                    }
+                }
+                
+                // Confidence indicator
+                if result.confidence > 0 {
+                    Text("\(Int(result.confidence * 100))% confident")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                }
+            }
+            
+            Spacer()
+            
+            // Actions
+            VStack(spacing: 12) {
+                Button {
+                    let confirmed = RecognitionResult(
+                        category: selectedCategory,
+                        manufacturer: selectedManufacturer.isEmpty ? nil : selectedManufacturer,
+                        confidence: result.confidence,
+                        capturedImage: result.capturedImage
+                    )
+                    onConfirm(confirmed)
+                } label: {
+                    Text("Yes, continue")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+                
+                HStack(spacing: 24) {
+                    Button("Try again", action: onRetry)
+                    Button("Skip to form", action: onSkipToForm)
+                }
+                .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal)
+            
+            Spacer().frame(height: 20)
+        }
+        .navigationTitle("Confirm")
+        .navigationBarTitleDisplayMode(.inline)
+        .sheet(isPresented: $showCategoryPicker) {
+            CategoryPickerSheet(
+                selectedCategory: $selectedCategory,
+                categories: knowledgeBase.allCategories()
+            )
+        }
+        .sheet(isPresented: $showManufacturerPicker) {
+            ManufacturerPickerSheet(
+                selectedManufacturer: $selectedManufacturer,
+                category: selectedCategory
+            )
+        }
+    }
+}
+
+// MARK: - Category Picker
+
+private struct CategoryPickerSheet: View {
+    @Binding var selectedCategory: ApplianceCategory
+    let categories: [CategoryKnowledge]
+    @Environment(\.dismiss) private var dismiss
+    
+    var body: some View {
+        NavigationStack {
+            List(categories, id: \.id) { (cat: CategoryKnowledge) in
+                Button {
+                    selectedCategory = cat.category
+                    dismiss()
+                } label: {
+                    HStack {
+                        Text(cat.displayName)
+                            .foregroundStyle(.primary)
+                        Spacer()
+                        if cat.category == selectedCategory {
+                            Image(systemName: "checkmark")
+                                .foregroundStyle(Color.accentColor)
+                        }
+                    }
+                }
+            }
+            .navigationTitle("Select Category")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+            }
+        }
+        .presentationDetents([.medium])
+    }
+}
+
+// MARK: - Manufacturer Picker
+
+private struct ManufacturerPickerSheet: View {
+    @Binding var selectedManufacturer: String
+    let category: ApplianceCategory
+    @EnvironmentObject private var knowledgeBase: ApplianceKnowledgeBase
+    @Environment(\.dismiss) private var dismiss
+    @State private var customManufacturer = ""
+    
+    private var manufacturers: [String] {
+        knowledgeBase.knowledge(for: category)?.commonManufacturers ?? []
+    }
+    
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    ForEach(manufacturers, id: \.self) { (manufacturer: String) in
+                        Button {
+                            selectedManufacturer = manufacturer.capitalized
+                            dismiss()
+                        } label: {
+                            HStack {
+                                Text(manufacturer.capitalized)
+                                    .foregroundStyle(.primary)
+                                Spacer()
+                                if manufacturer.lowercased() == selectedManufacturer.lowercased() {
+                                    Image(systemName: "checkmark")
+                                        .foregroundStyle(Color.accentColor)
+                                }
+                            }
+                        }
+                    }
+                }
+                
+                Section("Other") {
+                    HStack {
+                        TextField("Enter manufacturer", text: $customManufacturer)
+                        Button("Add") {
+                            selectedManufacturer = customManufacturer
+                            dismiss()
+                        }
+                        .disabled(customManufacturer.isEmpty)
+                    }
+                }
+            }
+            .navigationTitle("Select Manufacturer")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+            }
+        }
+        .presentationDetents([.medium])
+    }
+}
+
+
+// ===== Sources/AssetKit/Capture/AssetFormView.swift =====
+//
+//  AssetFormView.swift
+//  AssetKit
+//
+//  Created by Jim Bergren on 1/23/26.
+//
+
+
+import SwiftUI
+import CastleMindrModels
+
+public struct AssetFormView: View {
+    let initialData: AssetFormData
+    let context: AssetCaptureContext
+    let onSave: (Asset, TrainingSample?) -> Void
+    let onCancel: () -> Void
+    
+    @EnvironmentObject private var knowledgeBase: ApplianceKnowledgeBase
+    
+    @State private var name: String
+    @State private var category: ApplianceCategory
+    @State private var manufacturer: String
+    @State private var modelNumber: String
+    @State private var serialNumber: String
+    @State private var purchaseDate: Date?
+    @State private var warrantyExpires: Date?
+    @State private var notes: String
+    
+    @State private var showPurchaseDatePicker = false
+    @State private var showWarrantyDatePicker = false
+    @State private var showCategoryPicker = false
+    
+    public init(
+        initialData: AssetFormData,
+        context: AssetCaptureContext,
+        onSave: @escaping (Asset, TrainingSample?) -> Void,
+        onCancel: @escaping () -> Void
+    ) {
+        self.initialData = initialData
+        self.context = context
+        self.onSave = onSave
+        self.onCancel = onCancel
+        
+        _name = State(initialValue: initialData.name)
+        _category = State(initialValue: initialData.category)
+        _manufacturer = State(initialValue: initialData.manufacturer)
+        _modelNumber = State(initialValue: initialData.modelNumber)
+        _serialNumber = State(initialValue: initialData.serialNumber)
+        _purchaseDate = State(initialValue: initialData.purchaseDate)
+        _warrantyExpires = State(initialValue: initialData.warrantyExpires)
+        _notes = State(initialValue: initialData.notes)
+    }
+    
+    private var categoryDisplayName: String {
+        knowledgeBase.knowledge(for: category)?.displayName ?? category.rawValue.capitalized
+    }
+    
+    private var generatedName: String {
+        if !name.isEmpty { return name }
+        let mfr = manufacturer.isEmpty ? "" : "\(manufacturer) "
+        return "\(mfr)\(categoryDisplayName)"
+    }
+    
+    private var canSave: Bool {
+        category != .unknown
+    }
+    
+    public var body: some View {
+        Form {
+            Section {
+                // Name
+                HStack {
+                    Text("Name")
+                    Spacer()
+                    TextField("Auto-generated", text: $name)
+                        .multilineTextAlignment(.trailing)
+                        .foregroundStyle(name.isEmpty ? .secondary : .primary)
+                }
+                
+                // Category
+                Button {
+                    showCategoryPicker = true
+                } label: {
+                    HStack {
+                        Text("Type")
+                            .foregroundStyle(.primary)
+                        Spacer()
+                        Text(category == .unknown ? "Select" : categoryDisplayName)
+                            .foregroundStyle(category == .unknown ? .secondary : .primary)
+                        Image(systemName: "chevron.right")
+                            .font(.caption)
+                            .foregroundStyle(.tertiary)
+                    }
+                }
+                
+                // Manufacturer
+                HStack {
+                    Text("Manufacturer")
+                    Spacer()
+                    TextField("Optional", text: $manufacturer)
+                        .multilineTextAlignment(.trailing)
+                }
+                if !initialData.manufacturer.isEmpty && initialData.manufacturer == manufacturer {
+                    ScannedIndicator()
+                }
+                
+                // Model
+                HStack {
+                    Text("Model")
+                    Spacer()
+                    TextField("Optional", text: $modelNumber)
+                        .multilineTextAlignment(.trailing)
+                }
+                if !initialData.modelNumber.isEmpty && initialData.modelNumber == modelNumber {
+                    ScannedIndicator()
+                }
+                
+                // Serial
+                HStack {
+                    Text("Serial")
+                    Spacer()
+                    TextField("Optional", text: $serialNumber)
+                        .multilineTextAlignment(.trailing)
+                }
+                if !initialData.serialNumber.isEmpty && initialData.serialNumber == serialNumber {
+                    ScannedIndicator()
+                }
+            } header: {
+                Text("Details")
+            }
+            
+            Section {
+                // Purchase date
+                Button {
+                    showPurchaseDatePicker.toggle()
+                } label: {
+                    HStack {
+                        Text("Purchase Date")
+                            .foregroundStyle(.primary)
+                        Spacer()
+                        Text(purchaseDate?.formatted(date: .abbreviated, time: .omitted) ?? "Not set")
+                            .foregroundStyle(purchaseDate == nil ? .secondary : .primary)
+                    }
+                }
+                if showPurchaseDatePicker {
+                    DatePicker(
+                        "Purchase Date",
+                        selection: Binding(
+                            get: { purchaseDate ?? Date() },
+                            set: { purchaseDate = $0 }
+                        ),
+                        displayedComponents: .date
+                    )
+                    .datePickerStyle(.graphical)
+                    
+                    Button("Clear") {
+                        purchaseDate = nil
+                        showPurchaseDatePicker = false
+                    }
+                    .foregroundStyle(.red)
+                }
+                
+                // Warranty expiration
+                Button {
+                    showWarrantyDatePicker.toggle()
+                } label: {
+                    HStack {
+                        Text("Warranty Expires")
+                            .foregroundStyle(.primary)
+                        Spacer()
+                        Text(warrantyExpires?.formatted(date: .abbreviated, time: .omitted) ?? "Not set")
+                            .foregroundStyle(warrantyExpires == nil ? .secondary : .primary)
+                    }
+                }
+                if showWarrantyDatePicker {
+                    DatePicker(
+                        "Warranty Expires",
+                        selection: Binding(
+                            get: { warrantyExpires ?? Date() },
+                            set: { warrantyExpires = $0 }
+                        ),
+                        displayedComponents: .date
+                    )
+                    .datePickerStyle(.graphical)
+                    
+                    Button("Clear") {
+                        warrantyExpires = nil
+                        showWarrantyDatePicker = false
+                    }
+                    .foregroundStyle(.red)
+                }
+            } header: {
+                Text("Optional")
+            }
+            
+            Section {
+                TextField("Notes", text: $notes, axis: .vertical)
+                    .lineLimit(3...6)
+            } header: {
+                Text("Notes")
+            }
+        }
+        .navigationTitle("Asset Details")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .cancellationAction) {
+                Button("Cancel", action: onCancel)
+            }
+            ToolbarItem(placement: .confirmationAction) {
+                Button("Save") {
+                    saveAsset()
+                }
+                .fontWeight(.semibold)
+                .disabled(!canSave)
+            }
+        }
+        .sheet(isPresented: $showCategoryPicker) {
+            FormCategoryPicker(
+                selectedCategory: $category,
+                categories: knowledgeBase.allCategories()
+            )
+        }
+    }
+    
+    private func saveAsset() {
+        let (propertyId, areaId): (String, String?) = {
+            switch context {
+            case .property(let id):
+                return (id, nil)
+            case .room(let propId, let roomId):
+                return (propId, roomId)
+            }
+        }()
+        
+        let asset = Asset(
+            id: UUID().uuidString,
+            name: generatedName,
+            propertyId: propertyId,
+            type: category,
+            areaId: areaId,
+            manufacturer: manufacturer.isEmpty ? nil : manufacturer,
+            modelNumber: modelNumber.isEmpty ? nil : modelNumber,
+            serialNumber: serialNumber.isEmpty ? nil : serialNumber,
+            purchaseDate: purchaseDate,
+            warrantyExpires: warrantyExpires,
+            notes: notes.isEmpty ? nil : notes
+        )
+        
+        // TODO: Build training sample from capture data
+        onSave(asset, nil)
+    }
+}
+
+// MARK: - Scanned Indicator
+
+private struct ScannedIndicator: View {
+    var body: some View {
+        HStack {
+            Spacer()
+            Label("Scanned", systemImage: "viewfinder")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
+        .listRowInsets(EdgeInsets(top: -8, leading: 0, bottom: 0, trailing: 16))
+        .listRowBackground(Color.clear)
+    }
+}
+
+// MARK: - Category Picker
+
+private struct FormCategoryPicker: View {
+    @Binding var selectedCategory: ApplianceCategory
+    let categories: [CategoryKnowledge]
+    @Environment(\.dismiss) private var dismiss
+    
+    var body: some View {
+        NavigationStack {
+            List(categories, id: \.id) { (cat: CategoryKnowledge) in
+                Button {
+                    selectedCategory = cat.category
+                    dismiss()
+                } label: {
+                    HStack {
+                        Text(cat.displayName)
+                            .foregroundStyle(.primary)
+                        Spacer()
+                        if cat.category == selectedCategory {
+                            Image(systemName: "checkmark")
+                                .foregroundStyle(Color.accentColor)
+                        }
+                    }
+                }
+            }
+            .navigationTitle("Select Type")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+            }
+        }
+        .presentationDetents([.medium])
+    }
+}
+
+
+// ===== Sources/AssetKit/Capture/AssetCaptureCoordinator.swift =====
+//
+//  AssetCaptureCoordinator.swift
+//  AssetKit
+//
+//  Created by Jim Bergren on 1/23/26.
+//
+
+import SwiftUI
+import CastleMindrModels
+
+// MARK: - Capture Context
+
+public enum AssetCaptureContext {
+    case property(propertyId: String)
+    case room(propertyId: String, areaId: String)
+}
+
+// MARK: - Capture Result
+
+public enum AssetCaptureResult {
+    case completed(asset: Asset, trainingData: TrainingSample?)
+    case cancelled
+}
+
+// MARK: - Training Sample
+
+public struct TrainingSample: Codable {
+    public let image: Data
+    public let confirmedCategory: String
+    public let confirmedManufacturer: String?
+    public let labelBoundingBox: BoundingBox?
+    public let ocrRawText: String?
+    public let fieldMappings: [String: FieldMapping]?
+    public let cloudWasUsed: Bool
+    public let userCorrectedCloud: Bool
+    public let deviceModel: String
+    public let timestamp: Date
+    
+    public struct FieldMapping: Codable {
+        public let text: String
+        public let boundingBox: BoundingBox?
+    }
+    
+    public struct BoundingBox: Codable {
+        public let x: Double
+        public let y: Double
+        public let width: Double
+        public let height: Double
+    }
+}
+
+// MARK: - Coordinator
+
+@MainActor
+public final class AssetCaptureCoordinator: ObservableObject {
+    
+    public let context: AssetCaptureContext
+    private var onComplete: ((AssetCaptureResult) -> Void)?
+    
+    public init(context: AssetCaptureContext) {
+        self.context = context
+    }
+    
+    public func start(onComplete: @escaping (AssetCaptureResult) -> Void) {
+        self.onComplete = onComplete
+    }
+    
+    public func complete(with asset: Asset, trainingData: TrainingSample? = nil) {
+        onComplete?(.completed(asset: asset, trainingData: trainingData))
+    }
+    
+    public func cancel() {
+        onComplete?(.cancelled)
+    }
+}
+
+
+// ===== Sources/AssetKit/Capture/AssetCaptureView.swift =====
+//
+//  AssetCaptureView.swift
+//  AssetKit
+//
+//  Created by Jim Bergren on 1/23/26.
+//
+
+import SwiftUI
+import CastleMindrModels
+
+// MARK: - Flow State
+
+public enum AssetCaptureFlowState {
+    case entrySelection
+    case objectRecognition
+    case confirmRecognition(RecognitionResult)
+    case guidedLabelScan(RecognitionResult)
+    case form(AssetFormData)
+}
+
+// MARK: - Form Data
+
+public struct AssetFormData {
+    public var name: String
+    public var category: ApplianceCategory
+    public var manufacturer: String
+    public var modelNumber: String
+    public var serialNumber: String
+    public var purchaseDate: Date?
+    public var warrantyExpires: Date?
+    public var notes: String
+    public var applianceImage: UIImage?
+    public var labelImage: UIImage?
+    
+    public init(
+        name: String = "",
+        category: ApplianceCategory = .unknown,
+        manufacturer: String = "",
+        modelNumber: String = "",
+        serialNumber: String = "",
+        purchaseDate: Date? = nil,
+        warrantyExpires: Date? = nil,
+        notes: String = "",
+        applianceImage: UIImage? = nil,
+        labelImage: UIImage? = nil
+    ) {
+        self.name = name
+        self.category = category
+        self.manufacturer = manufacturer
+        self.modelNumber = modelNumber
+        self.serialNumber = serialNumber
+        self.purchaseDate = purchaseDate
+        self.warrantyExpires = warrantyExpires
+        self.notes = notes
+        self.applianceImage = applianceImage
+        self.labelImage = labelImage
+    }
+    
+    public static func from(recognition: RecognitionResult) -> AssetFormData {
+        AssetFormData(
+            category: recognition.category,
+            manufacturer: recognition.manufacturer ?? "",
+            applianceImage: recognition.capturedImage
+        )
+    }
+}
+
+// MARK: - Capture View
+
+public struct AssetCaptureView: View {
+    @ObservedObject var coordinator: AssetCaptureCoordinator
+    @StateObject private var knowledgeBase: ApplianceKnowledgeBase
+    
+    @State private var flowState: AssetCaptureFlowState = .entrySelection
+    @State private var navigationPath = NavigationPath()
+    
+    public init(
+        coordinator: AssetCaptureCoordinator,
+        knowledgeProvider: KnowledgeProvider = BundledKnowledgeProvider()
+    ) {
+        self.coordinator = coordinator
+        self._knowledgeBase = StateObject(wrappedValue: ApplianceKnowledgeBase(provider: knowledgeProvider))
+    }
+    
+    public var body: some View {
+        NavigationStack(path: $navigationPath) {
+            EntryPointSelectionView(
+                onScanAppliance: { startObjectRecognition() },
+                onScanReceipt: { /* CAS-91 */ },
+                onEnterManually: { startManualEntry() },
+                onCancel: { coordinator.cancel() }
+            )
+            .navigationDestination(for: AssetCaptureFlowState.self) { state in
+                destinationView(for: state)
+            }
+        }
+        .task {
+            await knowledgeBase.load()
+        }
+        .environmentObject(knowledgeBase)
+    }
+    
+    // MARK: - Navigation
+    
+    @ViewBuilder
+    private func destinationView(for state: AssetCaptureFlowState) -> some View {
+        switch state {
+        case .entrySelection:
+            EmptyView()
+            
+        case .objectRecognition:
+            ObjectRecognitionView(
+                onRecognized: { result in
+                    navigationPath.append(AssetCaptureFlowState.confirmRecognition(result))
+                },
+                onSkip: { startManualEntry() },
+                onCancel: { coordinator.cancel() }
+            )
+            
+        case .confirmRecognition(let result):
+            ConfirmRecognitionView(
+                result: result,
+                onConfirm: { confirmedResult in
+                    navigationPath.append(AssetCaptureFlowState.guidedLabelScan(confirmedResult))
+                },
+                onRetry: {
+                    navigationPath.removeLast()
+                },
+                onSkipToForm: {
+                    let formData = AssetFormData.from(recognition: result)
+                    navigationPath.append(AssetCaptureFlowState.form(formData))
+                }
+            )
+            
+        case .guidedLabelScan(let recognition):
+            GuidedLabelScanView(
+                recognition: recognition,
+                onComplete: { formData in
+                    navigationPath.append(AssetCaptureFlowState.form(formData))
+                },
+                onSkip: {
+                    let formData = AssetFormData.from(recognition: recognition)
+                    navigationPath.append(AssetCaptureFlowState.form(formData))
+                }
+            )
+            
+        case .form(let formData):
+            AssetFormView(
+                initialData: formData,
+                context: coordinator.context,
+                onSave: { [coordinator] (asset: Asset, trainingData: TrainingSample?) in
+                    coordinator.complete(with: asset, trainingData: trainingData)
+                },
+                onCancel: { [coordinator] in
+                    coordinator.cancel()
+                }
+            )
+        }
+    }
+    
+    // MARK: - Actions
+    
+    private func startObjectRecognition() {
+        navigationPath.append(AssetCaptureFlowState.objectRecognition)
+    }
+    
+    private func startManualEntry() {
+        navigationPath.append(AssetCaptureFlowState.form(AssetFormData()))
+    }
+}
+
+// MARK: - Flow State Hashable
+
+extension AssetCaptureFlowState: Hashable {
+    public func hash(into hasher: inout Hasher) {
+        switch self {
+        case .entrySelection:
+            hasher.combine(0)
+        case .objectRecognition:
+            hasher.combine(1)
+        case .confirmRecognition(let result):
+            hasher.combine(2)
+            hasher.combine(result.category.rawValue)
+        case .guidedLabelScan(let result):
+            hasher.combine(3)
+            hasher.combine(result.category.rawValue)
+        case .form(let data):
+            hasher.combine(4)
+            hasher.combine(data.modelNumber)
+        }
+    }
+    
+    public static func == (lhs: AssetCaptureFlowState, rhs: AssetCaptureFlowState) -> Bool {
+        switch (lhs, rhs) {
+        case (.entrySelection, .entrySelection): return true
+        case (.objectRecognition, .objectRecognition): return true
+        case (.confirmRecognition(let l), .confirmRecognition(let r)): return l.category == r.category
+        case (.guidedLabelScan(let l), .guidedLabelScan(let r)): return l.category == r.category
+        case (.form(let l), .form(let r)): return l.modelNumber == r.modelNumber
+        default: return false
+        }
+    }
+}
+
+
+// ===== Sources/AssetKit/Capture/EntryPointSelectionView.swift =====
+//
+//  EntryPointSelectionView.swift
+//  AssetKit
+//
+//  Created by Jim Bergren on 1/23/26.
+//
+
+import SwiftUI
+
+public struct EntryPointSelectionView: View {
+    let onScanAppliance: () -> Void
+    let onScanReceipt: () -> Void
+    let onEnterManually: () -> Void
+    let onCancel: () -> Void
+    
+    public init(
+        onScanAppliance: @escaping () -> Void,
+        onScanReceipt: @escaping () -> Void,
+        onEnterManually: @escaping () -> Void,
+        onCancel: @escaping () -> Void
+    ) {
+        self.onScanAppliance = onScanAppliance
+        self.onScanReceipt = onScanReceipt
+        self.onEnterManually = onEnterManually
+        self.onCancel = onCancel
+    }
+    
+    public var body: some View {
+        VStack(spacing: 24) {
+            Spacer()
+            
+            Text("Add an Asset")
+                .font(.title)
+                .fontWeight(.semibold)
+            
+            Text("How would you like to add this item?")
+                .foregroundStyle(.secondary)
+            
+            Spacer()
+            
+            VStack(spacing: 16) {
+                EntryOptionButton(
+                    icon: "camera.fill",
+                    title: "Scan Appliance",
+                    subtitle: "Point camera at the appliance",
+                    action: onScanAppliance
+                )
+                
+                EntryOptionButton(
+                    icon: "doc.text.fill",
+                    title: "Scan Receipt",
+                    subtitle: "Capture purchase info",
+                    isEnabled: false, // CAS-91
+                    action: onScanReceipt
+                )
+                
+                EntryOptionButton(
+                    icon: "pencil",
+                    title: "Enter Manually",
+                    subtitle: "Type in the details",
+                    action: onEnterManually
+                )
+            }
+            .padding(.horizontal)
+            
+            Spacer()
+        }
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .cancellationAction) {
+                Button("Cancel", action: onCancel)
+            }
+        }
+    }
+}
+
+// MARK: - Entry Option Button
+
+private struct EntryOptionButton: View {
+    let icon: String
+    let title: String
+    let subtitle: String
+    var isEnabled: Bool = true
+    let action: () -> Void
+    
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 16) {
+                Image(systemName: icon)
+                    .font(.title2)
+                    .frame(width: 44, height: 44)
+                    .background(isEnabled ? Color.accentColor.opacity(0.1) : Color.gray.opacity(0.1))
+                    .foregroundStyle(isEnabled ? Color.accentColor : Color.gray)
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                        .font(.headline)
+                        .foregroundStyle(isEnabled ? .primary : .secondary)
+                    
+                    Text(subtitle)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+                
+                Spacer()
+                
+                Image(systemName: "chevron.right")
+                    .foregroundStyle(.tertiary)
+            }
+            .padding()
+            .background(Color(.secondarySystemBackground))
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+        }
+        .disabled(!isEnabled)
+    }
+}
+
+
+// ===== Sources/AssetKit/Capture/ObjectRecognitionView.swift =====
+//
+//  ObjectRecognitionView.swift
+//  AssetKit
+//
+//  Created by Jim Bergren on 1/23/26.
+//
+
+
+import SwiftUI
+
+public struct ObjectRecognitionView: View {
+    let onRecognized: (RecognitionResult) -> Void
+    let onSkip: () -> Void
+    let onCancel: () -> Void
+    
+    public init(
+        onRecognized: @escaping (RecognitionResult) -> Void,
+        onSkip: @escaping () -> Void,
+        onCancel: @escaping () -> Void
+    ) {
+        self.onRecognized = onRecognized
+        self.onSkip = onSkip
+        self.onCancel = onCancel
+    }
+    
+    public var body: some View {
+        VStack(spacing: 24) {
+            Spacer()
+            
+            // Placeholder for camera feed
+            RoundedRectangle(cornerRadius: 12)
+                .fill(Color.black)
+                .aspectRatio(3/4, contentMode: .fit)
+                .overlay {
+                    VStack(spacing: 12) {
+                        Image(systemName: "camera.viewfinder")
+                            .font(.system(size: 48))
+                            .foregroundStyle(.white.opacity(0.5))
+                        Text("Camera Preview")
+                            .foregroundStyle(.white.opacity(0.5))
+                    }
+                }
+                .padding(.horizontal)
+            
+            Text("Point at an appliance")
+                .font(.headline)
+            
+            Spacer()
+            
+            // Temp: simulate recognition
+            Button("Simulate Recognition") {
+                let result = RecognitionResult(
+                    category: .refrigerator,
+                    manufacturer: "Samsung",
+                    confidence: 0.92
+                )
+                onRecognized(result)
+            }
+            .buttonStyle(.borderedProminent)
+            
+            Button("Skip, enter manually", action: onSkip)
+                .foregroundStyle(.secondary)
+            
+            Spacer().frame(height: 20)
+        }
+        .navigationTitle("Scan Appliance")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .cancellationAction) {
+                Button("Cancel", action: onCancel)
+            }
+        }
+    }
+}
+
+
+// ===== Sources/AssetKit/Capture/GuidedLabelScanView.swift =====
+//
+//  GuidedLabelScanView.swift
+//  AssetKit
+//
+//  Created by Jim Bergren on 1/23/26.
+//
+
+
+import SwiftUI
+
+public struct GuidedLabelScanView: View {
+    let recognition: RecognitionResult
+    let onComplete: (AssetFormData) -> Void
+    let onSkip: () -> Void
+    
+    @EnvironmentObject private var knowledgeBase: ApplianceKnowledgeBase
+    
+    @State private var detectedModel = ""
+    @State private var detectedSerial = ""
+    @State private var detectedBrand = ""
+    
+    public init(
+        recognition: RecognitionResult,
+        onComplete: @escaping (AssetFormData) -> Void,
+        onSkip: @escaping () -> Void
+    ) {
+        self.recognition = recognition
+        self.onComplete = onComplete
+        self.onSkip = onSkip
+    }
+    
+    private var guidancePrompt: String {
+        knowledgeBase.guidancePrompt(
+            for: recognition.category,
+            manufacturer: recognition.manufacturer
+        )
+    }
+    
+    private var hasMinimumData: Bool {
+        !detectedModel.isEmpty || !detectedSerial.isEmpty
+    }
+    
+    public var body: some View {
+        VStack(spacing: 16) {
+            // Camera feed placeholder
+            RoundedRectangle(cornerRadius: 12)
+                .fill(Color.black)
+                .aspectRatio(3/4, contentMode: .fit)
+                .overlay {
+                    VStack(spacing: 12) {
+                        Image(systemName: "viewfinder")
+                            .font(.system(size: 48))
+                            .foregroundStyle(.white.opacity(0.5))
+                        Text("Label Scanner")
+                            .foregroundStyle(.white.opacity(0.5))
+                    }
+                }
+                .padding(.horizontal)
+            
+            // Guidance prompt
+            Text(guidancePrompt)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal)
+            
+            // Detected fields status
+            VStack(spacing: 8) {
+                FieldStatusRow(label: "Model", value: detectedModel)
+                FieldStatusRow(label: "Serial", value: detectedSerial)
+                FieldStatusRow(label: "Brand", value: detectedBrand.isEmpty ? recognition.manufacturer ?? "" : detectedBrand)
+            }
+            .padding()
+            .background(Color(.secondarySystemBackground))
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+            .padding(.horizontal)
+            
+            Spacer()
+            
+            // Temp: simulate OCR detection
+            Button("Simulate OCR Detection") {
+                detectedModel = "RF28R7351SR"
+                detectedSerial = "ABC123456789"
+                detectedBrand = recognition.manufacturer ?? "Samsung"
+            }
+            .buttonStyle(.bordered)
+            
+            // Actions
+            VStack(spacing: 12) {
+                Button {
+                    var formData = AssetFormData.from(recognition: recognition)
+                    formData.modelNumber = detectedModel
+                    formData.serialNumber = detectedSerial
+                    formData.manufacturer = detectedBrand.isEmpty ? recognition.manufacturer ?? "" : detectedBrand
+                    onComplete(formData)
+                } label: {
+                    Text("Looks good!")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+                .disabled(!hasMinimumData)
+                
+                Button("Enter manually", action: onSkip)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal)
+            
+            Spacer().frame(height: 20)
+        }
+        .navigationTitle("Scan Label")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+// MARK: - Field Status Row
+
+private struct FieldStatusRow: View {
+    let label: String
+    let value: String
+    
+    private var isDetected: Bool { !value.isEmpty }
+    
+    var body: some View {
+        HStack {
+            Image(systemName: isDetected ? "checkmark.circle.fill" : "circle")
+                .foregroundStyle(isDetected ? Color.green : Color.secondary)
+            
+            Text(label)
+                .foregroundStyle(Color.secondary)
+            
+            Spacer()
+            
+            Text(isDetected ? value : "—")
+                .fontWeight(isDetected ? .medium : .regular)
+                .foregroundStyle(isDetected ? Color.primary : Color.secondary)
+        }
+    }
+}
+
+
+// ===== Sources/AssetKit/Models/LabelLocation.swift =====
+//
+//  LabelLocation.swift
+//  AssetKit
+//
+//  Created by Jim Bergren on 1/24/26.
+//
+
+
+import Foundation
+import CastleMindrModels
+
+/// Location where the appliance label was found
+public enum LabelLocation: String, CaseIterable, Codable, Sendable {
+    case insideLeftDoor = "inside_left_door"
+    case insideRightDoor = "inside_right_door"
+    case backPanel = "back_panel"
+    case sideLeft = "side_left"
+    case sideRight = "side_right"
+    case topEdge = "top_edge"
+    case bottomEdge = "bottom_edge"
+    case behindAccessPanel = "behind_access_panel"
+    case drawerFront = "drawer_front"
+    case insideFrame = "inside_frame"
+    case other = "other"
+    
+    /// Human-readable display name
+    public var displayName: String {
+        switch self {
+        case .insideLeftDoor: return "Inside Left Door"
+        case .insideRightDoor: return "Inside Right Door"
+        case .backPanel: return "Back Panel"
+        case .sideLeft: return "Left Side"
+        case .sideRight: return "Right Side"
+        case .topEdge: return "Top Edge"
+        case .bottomEdge: return "Bottom Edge"
+        case .behindAccessPanel: return "Behind Access Panel"
+        case .drawerFront: return "Drawer Front"
+        case .insideFrame: return "Inside Frame"
+        case .other: return "Other"
+        }
+    }
+    
+    /// SF Symbol icon for picker
+    public var iconName: String {
+        switch self {
+        case .insideLeftDoor: return "door.left.hand.open"
+        case .insideRightDoor: return "door.right.hand.open"
+        case .backPanel: return "rectangle.portrait"
+        case .sideLeft: return "rectangle.lefthalf.filled"
+        case .sideRight: return "rectangle.righthalf.filled"
+        case .topEdge: return "rectangle.tophalf.filled"
+        case .bottomEdge: return "rectangle.bottomhalf.filled"
+        case .behindAccessPanel: return "rectangle.badge.minus"
+        case .drawerFront: return "tray"
+        case .insideFrame: return "rectangle.inset.filled"
+        case .other: return "questionmark.square"
+        }
+    }
+    
+    /// Common locations filtered by appliance category
+    public static func commonLocations(for category: ApplianceCategory) -> [LabelLocation] {
+        switch category {
+        case .refrigerator, .freezer:
+            return [.insideLeftDoor, .insideRightDoor, .backPanel, .sideLeft]
+        case .washer, .dryer:
+            return [.insideFrame, .backPanel, .topEdge, .sideLeft]
+        case .dishwasher:
+            return [.insideFrame, .sideLeft, .sideRight]
+        case .oven, .microwave:
+            return [.insideFrame, .backPanel, .sideLeft]
+        case .hvac:
+            return [.behindAccessPanel, .sideLeft, .sideRight]
+        case .waterHeater:
+            return [.sideLeft, .sideRight, .backPanel]
+        default:
+            return [.backPanel, .sideLeft, .sideRight, .other]
+        }
+    }
+}
+
+
+// ===== Sources/AssetKit/Models/RecognitionResult.swift =====
+//
+//  RecognitionResult.swift
+//  AssetKit
+//
+//  Created by Jim Bergren on 1/23/26.
+//
+import Foundation
+import UIKit
+import CastleMindrModels
+
+/// Result from appliance recognition (API or on-device)
+public struct RecognitionResult: Equatable {
+    public let category: ApplianceCategory
+    public let manufacturer: String?
+    public let confidence: Double
+    public let capturedImage: UIImage?
+    
+    /// Error message if recognition failed (from API)
+    public let error: String?
+    
+    public init(
+        category: ApplianceCategory,
+        manufacturer: String? = nil,
+        confidence: Double,
+        capturedImage: UIImage? = nil,
+        error: String? = nil
+    ) {
+        self.category = category
+        self.manufacturer = manufacturer
+        self.confidence = confidence
+        self.capturedImage = capturedImage
+        self.error = error
+    }
+    
+    /// Whether this is a successful recognition (not unknown, no error, confidence > 0.5)
+    public var isSuccessful: Bool {
+        category != .unknown && error == nil && confidence > 0.5
+    }
+}
+
+// MARK: - API Response (for decoding JSON)
+
+/// Internal struct for decoding API response
+struct RecognitionAPIResponse: Codable {
+    let category: String
+    let manufacturer: String?
+    let confidence: Double
+    let error: String?
+    
+    func toResult(with image: UIImage?) -> RecognitionResult {
+        RecognitionResult(
+            category: ApplianceCategory(rawValue: category) ?? .unknown,
+            manufacturer: manufacturer,
+            confidence: confidence,
+            capturedImage: image,
+            error: error
+        )
+    }
+}
+
+
+// ===== Sources/AssetKit/Models/TrainingSample.swift =====
+//
+//  TrainingSample.swift
+//  AssetKit
+//
+//  Created by Jim Bergren on 1/24/26.
+//
+
+
+import Foundation
+import UIKit
+import CastleMindrModels
+
+/// Training sample captured during asset creation flow
+/// Submitted to backend for ML model training
+public struct TrainingSample: Codable {
+    
+    // MARK: - Identification
+    
+    /// Unique ID for this sample
+    public let id: String
+    
+    /// Timestamp of capture
+    public let createdAt: Date
+    
+    // MARK: - Recognition Data
+    
+    /// Confirmed category (user-verified)
+    public let category: String
+    
+    /// Confirmed manufacturer (user-verified, optional)
+    public let manufacturer: String?
+    
+    // MARK: - AI Interaction
+    
+    /// What the AI predicted
+    public let aiPredictedCategory: String
+    
+    /// AI's manufacturer prediction
+    public let aiPredictedManufacturer: String?
+    
+    /// AI confidence score (0-1)
+    public let aiConfidence: Double
+    
+    /// Whether cloud API was used (vs on-device)
+    public let wasCloudUsed: Bool
+    
+    /// User corrected the AI's category prediction
+    public let userCorrectedCategory: Bool
+    
+    /// User corrected the AI's manufacturer prediction
+    public let userCorrectedManufacturer: Bool
+    
+    // MARK: - Label Data
+    
+    /// Where the label was located
+    public let labelLocation: String?
+    
+    /// How location was determined
+    public let labelLocationSource: String  // user_selected, inferred, skipped
+    
+    /// OCR-extracted fields with bounding boxes
+    public let ocrFields: OCRFieldsDTO?
+    
+    /// Raw OCR text
+    public let ocrRawText: String?
+    
+    // MARK: - Device Context
+    
+    /// Device model (e.g., "iPhone 15 Pro")
+    public let deviceModel: String
+    
+    /// iOS version
+    public let osVersion: String
+    
+    /// App version
+    public let appVersion: String
+    
+    // MARK: - Init
+    
+    public init(
+        id: String = UUID().uuidString,
+        createdAt: Date = Date(),
+        category: String,
+        manufacturer: String?,
+        aiPredictedCategory: String,
+        aiPredictedManufacturer: String?,
+        aiConfidence: Double,
+        wasCloudUsed: Bool,
+        userCorrectedCategory: Bool,
+        userCorrectedManufacturer: Bool,
+        labelLocation: String?,
+        labelLocationSource: String,
+        ocrFields: OCRFieldsDTO?,
+        ocrRawText: String?,
+        deviceModel: String,
+        osVersion: String,
+        appVersion: String
+    ) {
+        self.id = id
+        self.createdAt = createdAt
+        self.category = category
+        self.manufacturer = manufacturer
+        self.aiPredictedCategory = aiPredictedCategory
+        self.aiPredictedManufacturer = aiPredictedManufacturer
+        self.aiConfidence = aiConfidence
+        self.wasCloudUsed = wasCloudUsed
+        self.userCorrectedCategory = userCorrectedCategory
+        self.userCorrectedManufacturer = userCorrectedManufacturer
+        self.labelLocation = labelLocation
+        self.labelLocationSource = labelLocationSource
+        self.ocrFields = ocrFields
+        self.ocrRawText = ocrRawText
+        self.deviceModel = deviceModel
+        self.osVersion = osVersion
+        self.appVersion = appVersion
+    }
+}
+
+// MARK: - OCR Fields DTO (for JSON encoding)
+
+public struct OCRFieldsDTO: Codable {
+    public let modelNumber: OCRFieldDTO?
+    public let serialNumber: OCRFieldDTO?
+    public let manufacturer: OCRFieldDTO?
+    public let manufactureDate: OCRFieldDTO?
+    
+    public init(from ocrFields: OCRFields) {
+        self.modelNumber = ocrFields.modelNumber.map { OCRFieldDTO(from: $0) }
+        self.serialNumber = ocrFields.serialNumber.map { OCRFieldDTO(from: $0) }
+        self.manufacturer = ocrFields.manufacturer.map { OCRFieldDTO(from: $0) }
+        self.manufactureDate = ocrFields.manufactureDate.map { OCRFieldDTO(from: $0) }
+    }
+}
+
+public struct OCRFieldDTO: Codable {
+    public let text: String
+    public let confidence: Double
+    public let boundingBox: BoundingBoxDTO?
+    
+    public init(from field: OCRField) {
+        self.text = field.text
+        self.confidence = field.confidence
+        self.boundingBox = field.boundingBox.map { BoundingBoxDTO(from: $0) }
+    }
+}
+
+public struct BoundingBoxDTO: Codable {
+    public let x: Double
+    public let y: Double
+    public let width: Double
+    public let height: Double
+    
+    public init(from rect: CGRect) {
+        self.x = rect.origin.x
+        self.y = rect.origin.y
+        self.width = rect.size.width
+        self.height = rect.size.height
+    }
+}
+
+// MARK: - Builder
+
+extension TrainingSample {
+    
+    /// Build training sample from capture flow data
+    public static func build(
+        recognition: RecognitionResult,
+        confirmedCategory: ApplianceCategory,
+        confirmedManufacturer: String?,
+        labelScan: LabelScanResult?
+    ) -> TrainingSample {
+        
+        let deviceInfo = DeviceInfo.current
+        
+        return TrainingSample(
+            category: confirmedCategory.rawValue,
+            manufacturer: confirmedManufacturer,
+            aiPredictedCategory: recognition.category.rawValue,
+            aiPredictedManufacturer: recognition.manufacturer,
+            aiConfidence: recognition.confidence,
+            wasCloudUsed: true,  // For now, always cloud
+            userCorrectedCategory: recognition.category != confirmedCategory,
+            userCorrectedManufacturer: recognition.manufacturer != confirmedManufacturer,
+            labelLocation: labelScan?.labelLocation?.rawValue,
+            labelLocationSource: labelScan?.labelLocationSource.rawValue ?? "skipped",
+            ocrFields: labelScan.map { OCRFieldsDTO(from: $0.ocrFields) },
+            ocrRawText: labelScan?.ocrFields.rawText,
+            deviceModel: deviceInfo.model,
+            osVersion: deviceInfo.osVersion,
+            appVersion: deviceInfo.appVersion
+        )
+    }
+}
+
+// MARK: - Device Info Helper
+
+private struct DeviceInfo {
+    let model: String
+    let osVersion: String
+    let appVersion: String
+    
+    static var current: DeviceInfo {
+        var systemInfo = utsname()
+        uname(&systemInfo)
+        let machineMirror = Mirror(reflecting: systemInfo.machine)
+        let model = machineMirror.children.reduce("") { identifier, element in
+            guard let value = element.value as? Int8, value != 0 else { return identifier }
+            return identifier + String(UnicodeScalar(UInt8(value)))
+        }
+        
+        let osVersion = ProcessInfo.processInfo.operatingSystemVersionString
+        let appVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "unknown"
+        
+        return DeviceInfo(model: model, osVersion: osVersion, appVersion: appVersion)
+    }
+}
+
+// ===== Sources/AssetKit/Models/LabelScanResult.swift =====
+//
+//  LabelScanResult.swift
+//  AssetKit
+//
+//  Created by Jim Bergren on 1/24/26.
+//
+
+import Foundation
+import UIKit
+
+/// Field extracted from OCR with optional bounding box for training
+public struct OCRField: Codable, Sendable, Equatable {
+    public let text: String
+    public let confidence: Double
+    public let boundingBox: CGRect?  // Normalized 0-1 coordinates for training
+    
+    public init(text: String, confidence: Double = 1.0, boundingBox: CGRect? = nil) {
+        self.text = text
+        self.confidence = confidence
+        self.boundingBox = boundingBox
+    }
+    
+    // Custom Codable for CGRect
+    enum CodingKeys: String, CodingKey {
+        case text, confidence, boundingBox
+    }
+    
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        text = try container.decode(String.self, forKey: .text)
+        confidence = try container.decode(Double.self, forKey: .confidence)
+        if let boxDict = try container.decodeIfPresent([String: Double].self, forKey: .boundingBox) {
+            boundingBox = CGRect(
+                x: boxDict["x"] ?? 0,
+                y: boxDict["y"] ?? 0,
+                width: boxDict["width"] ?? 0,
+                height: boxDict["height"] ?? 0
+            )
+        } else {
+            boundingBox = nil
+        }
+    }
+    
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(text, forKey: .text)
+        try container.encode(confidence, forKey: .confidence)
+        if let box = boundingBox {
+            let boxDict: [String: Double] = [
+                "x": box.origin.x,
+                "y": box.origin.y,
+                "width": box.size.width,
+                "height": box.size.height
+            ]
+            try container.encode(boxDict, forKey: .boundingBox)
+        }
+    }
+}
+
+/// Collection of OCR-extracted fields from a label scan
+public struct OCRFields: Codable, Sendable, Equatable {
+    public var modelNumber: OCRField?
+    public var serialNumber: OCRField?
+    public var manufacturer: OCRField?
+    public var manufactureDate: OCRField?
+    public var voltage: OCRField?
+    public var wattage: OCRField?
+    
+    /// Raw OCR text for training/debugging
+    public var rawText: String?
+    
+    public init(
+        modelNumber: OCRField? = nil,
+        serialNumber: OCRField? = nil,
+        manufacturer: OCRField? = nil,
+        manufactureDate: OCRField? = nil,
+        voltage: OCRField? = nil,
+        wattage: OCRField? = nil,
+        rawText: String? = nil
+    ) {
+        self.modelNumber = modelNumber
+        self.serialNumber = serialNumber
+        self.manufacturer = manufacturer
+        self.manufactureDate = manufactureDate
+        self.voltage = voltage
+        self.wattage = wattage
+        self.rawText = rawText
+    }
+    
+    /// Check if minimum required fields are captured
+    public var hasMinimumData: Bool {
+        modelNumber != nil || serialNumber != nil
+    }
+}
+
+/// Result from the guided label scan flow
+public struct LabelScanResult: Equatable {
+    public let labelImage: UIImage
+    public let ocrFields: OCRFields
+    public var labelLocation: LabelLocation?
+    public let labelLocationSource: LabelLocationSource
+    
+    public init(
+        labelImage: UIImage,
+        ocrFields: OCRFields,
+        labelLocation: LabelLocation? = nil,
+        labelLocationSource: LabelLocationSource = .pending
+    ) {
+        self.labelImage = labelImage
+        self.ocrFields = ocrFields
+        self.labelLocation = labelLocation
+        self.labelLocationSource = labelLocationSource
+    }
+}
+
+/// How the label location was determined
+public enum LabelLocationSource: String, Codable, Sendable {
+    case userSelected = "user_selected"   // User picked from list
+    case inferred = "inferred"             // AI/heuristics guessed
+    case skipped = "skipped"               // User skipped, enough data exists
+    case pending = "pending"               // Not yet determined
+}
+
+
+// ===== Sources/AssetKit/Knowledge/ApplianceKnowledge.swift =====
+//
+//  ApplianceKnowledge.swift
+//  AssetKit
+//
+//  Created by Jim Bergren on 1/23/26.
+//
+//
+
+import Foundation
+import CastleMindrModels
+
+// MARK: - Label Location
+
+public struct LabelLocation: Codable, Sendable {
+    public let position: String
+    public let instructions: String
+    public let probability: Double
+    
+    public init(position: String, instructions: String, probability: Double) {
+        self.position = position
+        self.instructions = instructions
+        self.probability = probability
+    }
+}
+
+// MARK: - Field Pattern
+
+public struct FieldPattern: Codable, Sendable {
+    public let fieldName: String
+    public let regex: String
+    public let labelHints: [String]
+    
+    public init(fieldName: String, regex: String, labelHints: [String]) {
+        self.fieldName = fieldName
+        self.regex = regex
+        self.labelHints = labelHints
+    }
+}
+
+// MARK: - Category Knowledge
+
+public struct CategoryKnowledge: Codable, Identifiable, Sendable {
+    public var id: String { category.rawValue }
+    public let category: ApplianceCategory
+    public let displayName: String
+    public let icon: String?
+    public let commonManufacturers: [String]
+    public let labelLocations: [LabelLocation]
+    public let fieldPatterns: [FieldPattern]
+    
+    public init(
+        category: ApplianceCategory,
+        displayName: String,
+        icon: String? = nil,
+        commonManufacturers: [String] = [],
+        labelLocations: [LabelLocation] = [],
+        fieldPatterns: [FieldPattern] = []
+    ) {
+        self.category = category
+        self.displayName = displayName
+        self.icon = icon
+        self.commonManufacturers = commonManufacturers
+        self.labelLocations = labelLocations
+        self.fieldPatterns = fieldPatterns
+    }
+}
+
+// MARK: - Manufacturer Knowledge
+
+public struct ManufacturerKnowledge: Codable, Identifiable, Sendable {
+    public var id: String { name.lowercased() }
+    public let name: String
+    public let categories: [String: ManufacturerCategoryOverride]
+    
+    public init(name: String, categories: [String: ManufacturerCategoryOverride] = [:]) {
+        self.name = name
+        self.categories = categories
+    }
+    
+    public func override(for category: ApplianceCategory) -> ManufacturerCategoryOverride? {
+        categories[category.rawValue]
+    }
+}
+
+public struct ManufacturerCategoryOverride: Codable, Sendable {
+    public let labelLocations: [LabelLocation]?
+    public let modelPattern: String?
+    public let serialPattern: String?
+    
+    public init(
+        labelLocations: [LabelLocation]? = nil,
+        modelPattern: String? = nil,
+        serialPattern: String? = nil
+    ) {
+        self.labelLocations = labelLocations
+        self.modelPattern = modelPattern
+        self.serialPattern = serialPattern
+    }
+}
+
+// MARK: - Knowledge Provider Protocol
+
+public protocol KnowledgeProvider: Sendable {
+    func fetchCategories() async throws -> [CategoryKnowledge]
+    func fetchManufacturers() async throws -> [ManufacturerKnowledge]
+}
+
+// MARK: - Knowledge Base
+
+@MainActor
+public final class ApplianceKnowledgeBase: ObservableObject {
+    
+    @Published public private(set) var categories: [ApplianceCategory: CategoryKnowledge] = [:]
+    @Published public private(set) var manufacturers: [String: ManufacturerKnowledge] = [:]
+    @Published public private(set) var isLoaded = false
+    
+    private let provider: KnowledgeProvider
+    
+    public init(provider: KnowledgeProvider) {
+        self.provider = provider
+    }
+    
+    // MARK: - Loading
+    
+    public func load() async {
+        do {
+            async let cats = provider.fetchCategories()
+            async let mfrs = provider.fetchManufacturers()
+            
+            let (fetchedCats, fetchedMfrs) = try await (cats, mfrs)
+            
+            categories = Dictionary(uniqueKeysWithValues: fetchedCats.map { ($0.category, $0) })
+            manufacturers = Dictionary(uniqueKeysWithValues: fetchedMfrs.map { ($0.id, $0) })
+            isLoaded = true
+        } catch {
+            print("Failed to load knowledge base: \(error)")
+            // Could fall back to bundled data here
+        }
+    }
+    
+    // MARK: - Lookup
+    
+    public func knowledge(for category: ApplianceCategory) -> CategoryKnowledge? {
+        categories[category]
+    }
+    
+    public func knowledge(for manufacturer: String) -> ManufacturerKnowledge? {
+        manufacturers[manufacturer.lowercased()]
+    }
+    
+    public func labelLocations(for category: ApplianceCategory, manufacturer: String? = nil) -> [LabelLocation] {
+        // Manufacturer-specific overrides category default
+        if let mfr = manufacturer,
+           let mfrKnowledge = knowledge(for: mfr),
+           let override = mfrKnowledge.override(for: category),
+           let locations = override.labelLocations {
+            return locations
+        }
+        return knowledge(for: category)?.labelLocations ?? []
+    }
+    
+    public func guidancePrompt(for category: ApplianceCategory, manufacturer: String? = nil) -> String {
+        let locations = labelLocations(for: category, manufacturer: manufacturer)
+        guard let primary = locations.sorted(by: { $0.probability > $1.probability }).first else {
+            return "Look for a label with model and serial number information."
+        }
+        return primary.instructions
+    }
+    
+    public func allCategories() -> [CategoryKnowledge] {
+        Array(categories.values).sorted { $0.displayName < $1.displayName }
+    }
+}
+
+
+// ===== Sources/AssetKit/Knowledge/BundledKnowledgeProvider.swift =====
+//
+//  BundledKnowledgeProvider.swift
+//  AssetKit
+//
+//  Created by Jim Bergren on 1/23/26.
+//
+
+import Foundation
+
+public final class BundledKnowledgeProvider: KnowledgeProvider, Sendable {
+    
+    public init() {}
+    
+    public func fetchCategories() async throws -> [CategoryKnowledge] {
+        // Seed data — shipped with app, works offline
+        [
+            CategoryKnowledge(
+                category: .refrigerator,
+                displayName: "Refrigerator",
+                icon: "refrigerator.fill",
+                commonManufacturers: ["samsung", "lg", "whirlpool", "ge", "frigidaire", "kitchenaid"],
+                labelLocations: [
+                    LabelLocation(position: "inside_left_door", instructions: "Open the door and look on the inside left wall, usually near the top.", probability: 0.65),
+                    LabelLocation(position: "inside_right_door", instructions: "Open the door and look on the inside right wall.", probability: 0.20),
+                    LabelLocation(position: "back_panel", instructions: "Check the back of the unit near the compressor.", probability: 0.15)
+                ],
+                fieldPatterns: [
+                    FieldPattern(fieldName: "model", regex: "^[A-Z]{2,4}[0-9]{2,4}[A-Z0-9]*$", labelHints: ["Model", "Model No", "Model Number", "MOD"]),
+                    FieldPattern(fieldName: "serial", regex: "^[A-Z0-9]{10,20}$", labelHints: ["Serial", "Serial No", "Serial Number", "S/N", "SER"])
+                ]
+            ),
+            CategoryKnowledge(
+                category: .washer,
+                displayName: "Washing Machine",
+                icon: "washer.fill",
+                commonManufacturers: ["samsung", "lg", "whirlpool", "ge", "maytag", "speed queen"],
+                labelLocations: [
+                    LabelLocation(position: "inside_door_frame", instructions: "Open the door and look on the inside of the door frame.", probability: 0.50),
+                    LabelLocation(position: "back_panel", instructions: "Check the back panel of the unit.", probability: 0.30),
+                    LabelLocation(position: "under_lid", instructions: "For top-loaders, lift the lid and check underneath.", probability: 0.20)
+                ],
+                fieldPatterns: [
+                    FieldPattern(fieldName: "model", regex: "^[A-Z]{2,4}[0-9]{3,5}[A-Z0-9]*$", labelHints: ["Model", "Model No", "MOD"]),
+                    FieldPattern(fieldName: "serial", regex: "^[A-Z0-9]{8,16}$", labelHints: ["Serial", "S/N", "SER"])
+                ]
+            ),
+            CategoryKnowledge(
+                category: .dryer,
+                displayName: "Dryer",
+                icon: "dryer.fill",
+                commonManufacturers: ["samsung", "lg", "whirlpool", "ge", "maytag", "speed queen"],
+                labelLocations: [
+                    LabelLocation(position: "inside_door_frame", instructions: "Open the door and look on the inside of the door frame.", probability: 0.55),
+                    LabelLocation(position: "back_panel", instructions: "Check the back panel of the unit.", probability: 0.35),
+                    LabelLocation(position: "inside_door", instructions: "Look on the inside of the door itself.", probability: 0.10)
+                ],
+                fieldPatterns: [
+                    FieldPattern(fieldName: "model", regex: "^[A-Z]{2,4}[0-9]{3,5}[A-Z0-9]*$", labelHints: ["Model", "Model No", "MOD"]),
+                    FieldPattern(fieldName: "serial", regex: "^[A-Z0-9]{8,16}$", labelHints: ["Serial", "S/N", "SER"])
+                ]
+            ),
+            CategoryKnowledge(
+                category: .hvac,
+                displayName: "HVAC System",
+                icon: "air.conditioner.horizontal.fill",
+                commonManufacturers: ["carrier", "trane", "lennox", "rheem", "goodman", "american standard"],
+                labelLocations: [
+                    LabelLocation(position: "access_panel", instructions: "Open the access panel on the unit.", probability: 0.60),
+                    LabelLocation(position: "side_panel", instructions: "Check the side panel near the electrical connections.", probability: 0.30),
+                    LabelLocation(position: "near_filter", instructions: "Look near the filter slot area.", probability: 0.10)
+                ],
+                fieldPatterns: [
+                    FieldPattern(fieldName: "model", regex: "^[A-Z0-9]{6,15}$", labelHints: ["Model", "M/N", "MOD"]),
+                    FieldPattern(fieldName: "serial", regex: "^[A-Z0-9]{8,20}$", labelHints: ["Serial", "S/N", "SER"])
+                ]
+            ),
+            CategoryKnowledge(
+                category: .waterHeater,
+                displayName: "Water Heater",
+                icon: "flame.fill",
+                commonManufacturers: ["rheem", "ao smith", "bradford white", "state", "whirlpool"],
+                labelLocations: [
+                    LabelLocation(position: "front_panel", instructions: "Look on the front of the unit near the controls.", probability: 0.70),
+                    LabelLocation(position: "side_panel", instructions: "Check the side of the tank.", probability: 0.25),
+                    LabelLocation(position: "near_pipes", instructions: "Look near where the pipes connect at the top.", probability: 0.05)
+                ],
+                fieldPatterns: [
+                    FieldPattern(fieldName: "model", regex: "^[A-Z0-9\\-]{6,20}$", labelHints: ["Model", "M/N", "MOD"]),
+                    FieldPattern(fieldName: "serial", regex: "^[A-Z0-9]{8,16}$", labelHints: ["Serial", "S/N", "SER"]),
+                    FieldPattern(fieldName: "capacity", regex: "^[0-9]{2,3}\\s*(gal|GAL|gallon)?$", labelHints: ["Capacity", "Gallons", "GAL"])
+                ]
+            )
+        ]
+    }
+    
+    public func fetchManufacturers() async throws -> [ManufacturerKnowledge] {
+        [
+            ManufacturerKnowledge(
+                name: "Samsung",
+                categories: [
+                    "refrigerator": ManufacturerCategoryOverride(
+                        modelPattern: "^RF[0-9]{2}[A-Z][0-9]{4}[A-Z]{2,3}$",
+                        serialPattern: "^[A-Z0-9]{11,15}$"
+                    ),
+                    "washer": ManufacturerCategoryOverride(
+                        modelPattern: "^WF[0-9]{2}[A-Z][0-9]{4}[A-Z]{2}$"
+                    )
+                ]
+            ),
+            ManufacturerKnowledge(
+                name: "LG",
+                categories: [
+                    "refrigerator": ManufacturerCategoryOverride(
+                        modelPattern: "^L[A-Z]{2,3}[0-9]{4,5}[A-Z]{1,2}$"
+                    )
+                ]
+            ),
+            ManufacturerKnowledge(
+                name: "Whirlpool",
+                categories: [
+                    "refrigerator": ManufacturerCategoryOverride(
+                        modelPattern: "^W[A-Z]{2}[0-9]{5}[A-Z]{2,3}$"
+                    ),
+                    "washer": ManufacturerCategoryOverride(
+                        modelPattern: "^W[A-Z]{2}[0-9]{4,5}[A-Z]{2}$"
+                    )
+                ]
+            )
+        ]
+    }
+}
+
+
+// ===== Sources/AssetKit/Services/RecognitionAPIService.swift =====
+import Foundation
+import UIKit
+import Foundation
+import UIKit
+
+// MARK: - Recognition API Service
+
+/// Service for recognizing appliances via Cloud Function + Gemini Vision
+public actor RecognitionAPIService {
+    
+    // MARK: - Configuration
+    
+    private let endpoint: URL
+    private let maxImageDimension: CGFloat
+    private let jpegQuality: CGFloat
+    private let timeoutInterval: TimeInterval
+    
+    // MARK: - Singleton
+    
+    public static let shared = RecognitionAPIService()
+    
+    // MARK: - Init
+    
+    public init(
+        endpoint: URL = URL(string: "https://us-central1-chateau-3e605.cloudfunctions.net/recognize_appliance")!,
+        maxImageDimension: CGFloat = 1024,
+        jpegQuality: CGFloat = 0.75,
+        timeoutInterval: TimeInterval = 30
+    ) {
+        self.endpoint = endpoint
+        self.maxImageDimension = maxImageDimension
+        self.jpegQuality = jpegQuality
+        self.timeoutInterval = timeoutInterval
+    }
+    
+    // MARK: - Public API
+    
+    /// Recognize an appliance from an image
+    /// - Parameter image: The UIImage to analyze
+    /// - Returns: RecognitionResult with category, manufacturer, confidence, and the original image
+    public func recognize(_ image: UIImage) async throws -> RecognitionResult {
+        // 1. Prepare image (resize + compress)
+        guard let imageData = prepareImage(image) else {
+            throw RecognitionError.imageProcessingFailed
+        }
+        
+        // 2. Encode to base64
+        let base64String = imageData.base64EncodedString()
+        
+        // 3. Build request
+        var request = URLRequest(url: endpoint)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.timeoutInterval = timeoutInterval
+        
+        let body = ["image_base64": base64String]
+        request.httpBody = try JSONEncoder().encode(body)
+        
+        // 4. Send request
+        let (data, response) = try await URLSession.shared.data(for: request)
+        
+        // 5. Validate response
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw RecognitionError.invalidResponse
+        }
+        
+        guard httpResponse.statusCode == 200 else {
+            // Try to parse error message
+            if let errorResponse = try? JSONDecoder().decode(RecognitionAPIResponse.self, from: data),
+               let errorMessage = errorResponse.error {
+                throw RecognitionError.serverError(errorMessage)
+            }
+            throw RecognitionError.httpError(httpResponse.statusCode)
+        }
+        
+        // 6. Parse result and attach original image
+        let apiResponse = try JSONDecoder().decode(RecognitionAPIResponse.self, from: data)
+        return apiResponse.toResult(with: image)
+    }
+    
+    // MARK: - Image Processing
+    
+    private func prepareImage(_ image: UIImage) -> Data? {
+        // Resize if needed
+        let resized = image.resized(toFit: maxImageDimension)
+        
+        // Convert to JPEG
+        return resized.jpegData(compressionQuality: jpegQuality)
+    }
+}
+
+// MARK: - Errors
+
+public enum RecognitionError: LocalizedError {
+    case imageProcessingFailed
+    case invalidResponse
+    case httpError(Int)
+    case serverError(String)
+    
+    public var errorDescription: String? {
+        switch self {
+        case .imageProcessingFailed:
+            return "Failed to process image for upload"
+        case .invalidResponse:
+            return "Invalid response from server"
+        case .httpError(let code):
+            return "Server returned error code \(code)"
+        case .serverError(let message):
+            return message
+        }
+    }
+}
+
+// MARK: - UIImage Extension
+
+extension UIImage {
+    /// Resize image to fit within maxDimension, preserving aspect ratio
+    func resized(toFit maxDimension: CGFloat) -> UIImage {
+        let currentMax = max(size.width, size.height)
+        
+        // No resize needed
+        guard currentMax > maxDimension else { return self }
+        
+        let scale = maxDimension / currentMax
+        let newSize = CGSize(
+            width: size.width * scale,
+            height: size.height * scale
+        )
+        
+        let renderer = UIGraphicsImageRenderer(size: newSize)
+        return renderer.image { _ in
+            draw(in: CGRect(origin: .zero, size: newSize))
+        }
+    }
+}
+
+
