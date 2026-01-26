@@ -18,6 +18,7 @@ public enum AssetCaptureFlowState {
     case objectRecognition
     case confirmRecognition(RecognitionResult)
     case guidedLabelScan(RecognitionResult)
+    case labelLocationPicker(RecognitionResult, LabelScanResult)
     case form(AssetFormData)
 }
 
@@ -35,6 +36,10 @@ public struct AssetFormData {
     public var applianceImage: UIImage?
     public var labelImage: UIImage?
     
+    // For training data
+    public var originalRecognition: RecognitionResult?
+    public var labelScan: LabelScanResult?
+    
     public init(
         name: String = "",
         category: ApplianceCategory = .unknown,
@@ -45,7 +50,9 @@ public struct AssetFormData {
         warrantyExpires: Date? = nil,
         notes: String = "",
         applianceImage: UIImage? = nil,
-        labelImage: UIImage? = nil
+        labelImage: UIImage? = nil,
+        originalRecognition: RecognitionResult? = nil,
+        labelScan: LabelScanResult? = nil
     ) {
         self.name = name
         self.category = category
@@ -57,13 +64,29 @@ public struct AssetFormData {
         self.notes = notes
         self.applianceImage = applianceImage
         self.labelImage = labelImage
+        self.originalRecognition = originalRecognition
+        self.labelScan = labelScan
     }
     
     public static func from(recognition: RecognitionResult) -> AssetFormData {
         AssetFormData(
             category: recognition.category,
             manufacturer: recognition.manufacturer ?? "",
-            applianceImage: recognition.capturedImage
+            applianceImage: recognition.capturedImage,
+            originalRecognition: recognition
+        )
+    }
+    
+    public static func from(recognition: RecognitionResult, labelScan: LabelScanResult?) -> AssetFormData {
+        AssetFormData(
+            category: recognition.category,
+            manufacturer: labelScan?.ocrFields.manufacturer?.text ?? recognition.manufacturer ?? "",
+            modelNumber: labelScan?.ocrFields.modelNumber?.text ?? "",
+            serialNumber: labelScan?.ocrFields.serialNumber?.text ?? "",
+            applianceImage: recognition.capturedImage,
+            labelImage: labelScan?.labelImage,
+            originalRecognition: recognition,
+            labelScan: labelScan
         )
     }
 }
@@ -138,11 +161,49 @@ public struct AssetCaptureView: View {
         case .guidedLabelScan(let recognition):
             GuidedLabelScanView(
                 recognition: recognition,
-                onComplete: { formData in
+                onComplete: { labelScanResult in
+                    // Go to label location picker if we got OCR data
+                    if labelScanResult.ocrFields.hasMinimumData {
+                        navigationPath.append(AssetCaptureFlowState.labelLocationPicker(recognition, labelScanResult))
+                    } else {
+                        // No OCR data, skip picker
+                        let formData = AssetFormData.from(recognition: recognition, labelScan: labelScanResult)
+                        navigationPath.append(AssetCaptureFlowState.form(formData))
+                    }
+                },
+                onSkip: {
+                    let formData = AssetFormData.from(recognition: recognition, labelScan: nil)
+                    navigationPath.append(AssetCaptureFlowState.form(formData))
+                }
+            )
+        
+        case .labelLocationPicker(let recognition, let labelScanResult):
+            LabelLocationPickerView(
+                category: recognition.category,
+                onSelect: { location in
+                    var updatedScan = labelScanResult
+                    updatedScan.labelLocation = location
+                    let formData = AssetFormData.from(
+                        recognition: recognition,
+                        labelScan: LabelScanResult(
+                            labelImage: labelScanResult.labelImage,
+                            ocrFields: labelScanResult.ocrFields,
+                            labelLocation: location,
+                            labelLocationSource: .userSelected
+                        )
+                    )
                     navigationPath.append(AssetCaptureFlowState.form(formData))
                 },
                 onSkip: {
-                    let formData = AssetFormData.from(recognition: recognition)
+                    let formData = AssetFormData.from(
+                        recognition: recognition,
+                        labelScan: LabelScanResult(
+                            labelImage: labelScanResult.labelImage,
+                            ocrFields: labelScanResult.ocrFields,
+                            labelLocation: nil,
+                            labelLocationSource: .skipped
+                        )
+                    )
                     navigationPath.append(AssetCaptureFlowState.form(formData))
                 }
             )
@@ -187,8 +248,11 @@ extension AssetCaptureFlowState: Hashable {
         case .guidedLabelScan(let result):
             hasher.combine(3)
             hasher.combine(result.category.rawValue)
-        case .form(let data):
+        case .labelLocationPicker(let result, _):
             hasher.combine(4)
+            hasher.combine(result.category.rawValue)
+        case .form(let data):
+            hasher.combine(5)
             hasher.combine(data.modelNumber)
         }
     }
@@ -199,6 +263,7 @@ extension AssetCaptureFlowState: Hashable {
         case (.objectRecognition, .objectRecognition): return true
         case (.confirmRecognition(let l), .confirmRecognition(let r)): return l.category == r.category
         case (.guidedLabelScan(let l), .guidedLabelScan(let r)): return l.category == r.category
+        case (.labelLocationPicker(let l, _), .labelLocationPicker(let r, _)): return l.category == r.category
         case (.form(let l), .form(let r)): return l.modelNumber == r.modelNumber
         default: return false
         }

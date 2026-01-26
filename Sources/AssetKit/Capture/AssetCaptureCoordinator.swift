@@ -39,10 +39,29 @@ public final class AssetCaptureCoordinator: ObservableObject {
     }
     
     public func complete(with asset: Asset, trainingData: TrainingSample? = nil) {
+        print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+        print("✅ AssetKit: Asset capture completed")
+        print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+        print("   ID: \(asset.id)")
+        print("   Name: \(asset.name)")
+        print("   Type: \(asset.type.rawValue)")
+        print("   Manufacturer: \(asset.manufacturer ?? "nil")")
+        print("   Model: \(asset.modelNumber ?? "nil")")
+        print("   Serial: \(asset.serialNumber ?? "nil")")
+        if let training = trainingData {
+            print("   Training data: ✓")
+            print("      - AI predicted: \(training.aiPredictedCategory)")
+            print("      - User corrected: \(training.userCorrectedCategory)")
+        } else {
+            print("   Training data: none")
+        }
+        print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+        
         onComplete?(.completed(asset: asset, trainingData: trainingData))
     }
     
     public func cancel() {
+        print("❌ AssetKit: Asset capture cancelled")
         onComplete?(.cancelled)
     }
 }

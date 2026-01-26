@@ -5,7 +5,6 @@
 //  Created by Jim Bergren on 1/23/26.
 //
 
-
 import SwiftUI
 import CastleMindrModels
 
@@ -36,7 +35,14 @@ public struct ConfirmRecognitionView: View {
     }
     
     private var categoryDisplayName: String {
-        knowledgeBase.knowledge(for: selectedCategory)?.displayName ?? selectedCategory.rawValue.capitalized
+        // First check knowledge base for known display name
+        if let knowledge = knowledgeBase.knowledge(for: selectedCategory) {
+            return knowledge.displayName
+        }
+        // Otherwise format the raw value nicely: "patio_chair" -> "Patio Chair"
+        return selectedCategory.rawValue
+            .replacingOccurrences(of: "_", with: " ")
+            .capitalized
     }
     
     public var body: some View {
@@ -176,7 +182,7 @@ private struct CategoryPickerSheet: View {
                     }
                 }
             }
-            .navigationTitle("Select Category")
+            .navigationTitle("Select Type")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {

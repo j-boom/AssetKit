@@ -5,7 +5,6 @@
 //  Created by Jim Bergren on 1/24/26.
 //
 
-
 import Foundation
 import UIKit
 import CastleMindrModels
@@ -50,6 +49,12 @@ public struct TrainingSample: Codable {
     /// User corrected the AI's manufacturer prediction
     public let userCorrectedManufacturer: Bool
     
+    // MARK: - Item Bounding Box
+    
+    /// Normalized bounding box (0-1) of the item within the captured image
+    /// This is where the user drew the selection box
+    public let itemBoundingBox: BoundingBoxDTO?
+    
     // MARK: - Label Data
     
     /// Where the label was located
@@ -88,6 +93,7 @@ public struct TrainingSample: Codable {
         wasCloudUsed: Bool,
         userCorrectedCategory: Bool,
         userCorrectedManufacturer: Bool,
+        itemBoundingBox: BoundingBoxDTO?,
         labelLocation: String?,
         labelLocationSource: String,
         ocrFields: OCRFieldsDTO?,
@@ -106,6 +112,7 @@ public struct TrainingSample: Codable {
         self.wasCloudUsed = wasCloudUsed
         self.userCorrectedCategory = userCorrectedCategory
         self.userCorrectedManufacturer = userCorrectedManufacturer
+        self.itemBoundingBox = itemBoundingBox
         self.labelLocation = labelLocation
         self.labelLocationSource = labelLocationSource
         self.ocrFields = ocrFields
@@ -156,6 +163,13 @@ public struct BoundingBoxDTO: Codable {
         self.width = rect.size.width
         self.height = rect.size.height
     }
+    
+    public init(x: Double, y: Double, width: Double, height: Double) {
+        self.x = x
+        self.y = y
+        self.width = width
+        self.height = height
+    }
 }
 
 // MARK: - Builder
@@ -181,6 +195,7 @@ extension TrainingSample {
             wasCloudUsed: true,  // For now, always cloud
             userCorrectedCategory: recognition.category != confirmedCategory,
             userCorrectedManufacturer: recognition.manufacturer != confirmedManufacturer,
+            itemBoundingBox: recognition.boundingBox.map { BoundingBoxDTO(from: $0) },
             labelLocation: labelScan?.labelLocation?.rawValue,
             labelLocationSource: labelScan?.labelLocationSource.rawValue ?? "skipped",
             ocrFields: labelScan.map { OCRFieldsDTO(from: $0.ocrFields) },

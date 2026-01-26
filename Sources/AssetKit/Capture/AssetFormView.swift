@@ -5,7 +5,6 @@
 //  Created by Jim Bergren on 1/23/26.
 //
 
-
 import SwiftUI
 import CastleMindrModels
 
@@ -25,6 +24,7 @@ public struct AssetFormView: View {
     @State private var purchaseDate: Date?
     @State private var warrantyExpires: Date?
     @State private var notes: String
+    @State private var isSaving = false
     
     @State private var showPurchaseDatePicker = false
     @State private var showWarrantyDatePicker = false
@@ -52,7 +52,8 @@ public struct AssetFormView: View {
     }
     
     private var categoryDisplayName: String {
-        knowledgeBase.knowledge(for: category)?.displayName ?? category.rawValue.capitalized
+        knowledgeBase.knowledge(for: category)?.displayName
+            ?? category.rawValue.replacingOccurrences(of: "_", with: " ").capitalized
     }
     
     private var generatedName: String {
@@ -62,7 +63,7 @@ public struct AssetFormView: View {
     }
     
     private var canSave: Bool {
-        category != .unknown
+        category != .unknown && !isSaving
     }
     
     public var body: some View {
@@ -223,6 +224,8 @@ public struct AssetFormView: View {
     }
     
     private func saveAsset() {
+        isSaving = true
+        
         let (propertyId, areaId): (String, String?) = {
             switch context {
             case .property(let id):
@@ -246,8 +249,40 @@ public struct AssetFormView: View {
             notes: notes.isEmpty ? nil : notes
         )
         
-        // TODO: Build training sample from capture data
-        onSave(asset, nil)
+        // Build training sample if we have recognition data
+        var trainingSample: TrainingSample? = nil
+        
+        if let recognition = initialData.originalRecognition {
+            trainingSample = TrainingSample.build(
+                recognition: recognition,
+                confirmedCategory: category,
+                confirmedManufacturer: manufacturer.isEmpty ? nil : manufacturer,
+                labelScan: initialData.labelScan
+            )
+            
+            // Crop the image to bounding box for training
+            var trainingImage: UIImage? = recognition.capturedImage
+            if let fullImage = recognition.capturedImage,
+               let boundingBox = recognition.boundingBox {
+                trainingImage = fullImage.cropped(to: boundingBox) ?? fullImage
+            }
+            
+            // Submit training sample to cloud (fire and forget)
+            Task {
+                do {
+                    let result = try await TrainingSampleService.shared.submit(
+                        sample: trainingSample!,
+                        applianceImage: trainingImage,
+                        labelImage: initialData.labelScan?.labelImage
+                    )
+                    print("📊 Training sample submitted: \(result.sampleId)")
+                } catch {
+                    print("⚠️ Failed to submit training sample: \(error.localizedDescription)")
+                }
+            }
+        }
+        
+        onSave(asset, trainingSample)
     }
 }
 

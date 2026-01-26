@@ -64,6 +64,8 @@ public actor RecognitionAPIService {
             throw RecognitionError.invalidResponse
         }
         
+        
+        
         guard httpResponse.statusCode == 200 else {
             // Try to parse error message
             if let errorResponse = try? JSONDecoder().decode(RecognitionAPIResponse.self, from: data),
@@ -75,6 +77,7 @@ public actor RecognitionAPIService {
         
         // 6. Parse result and attach original image
         let apiResponse = try JSONDecoder().decode(RecognitionAPIResponse.self, from: data)
+        print("API Response: category=\(apiResponse.category), manufacturer=\(String(describing: apiResponse.manufacturer)), confidence=\(apiResponse.confidence)")
         return apiResponse.toResult(with: image)
     }
     
