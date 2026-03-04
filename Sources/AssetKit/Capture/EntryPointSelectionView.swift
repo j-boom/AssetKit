@@ -41,8 +41,8 @@ public struct EntryPointSelectionView: View {
             VStack(spacing: 16) {
                 EntryOptionButton(
                     icon: "camera.fill",
-                    title: "Scan Appliance",
-                    subtitle: "Point camera at the appliance",
+                    title: "Scan Asset",
+                    subtitle: "Point camera at the item",
                     action: onScanAppliance
                 )
                 

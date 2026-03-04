@@ -13,6 +13,9 @@ import CastleMindrModels
 public enum AssetCaptureContext {
     case property(propertyId: String)
     case room(propertyId: String, areaId: String)
+    /// Scan label on an existing asset to add model/serial number.
+    /// Jumps directly to the GuidedLabelScan flow, skipping object recognition.
+    case scanLabel(propertyId: String, existingAsset: Asset)
 }
 
 // MARK: - Capture Result
@@ -45,13 +48,19 @@ public final class AssetCaptureCoordinator: ObservableObject {
         print("   ID: \(asset.id)")
         print("   Name: \(asset.name)")
         print("   Type: \(asset.type.rawValue)")
+        print("   Brand: \(asset.brand ?? "nil")")
         print("   Manufacturer: \(asset.manufacturer ?? "nil")")
         print("   Model: \(asset.modelNumber ?? "nil")")
         print("   Serial: \(asset.serialNumber ?? "nil")")
         if let training = trainingData {
             print("   Training data: ✓")
             print("      - AI predicted: \(training.aiPredictedCategory)")
-            print("      - User corrected: \(training.userCorrectedCategory)")
+            print("      - AI predicted brand: \(training.aiPredictedBrand ?? "nil")")
+            print("      - User corrected category: \(training.userCorrectedCategory)")
+            print("      - User corrected brand: \(training.userCorrectedBrand)")
+            print("      - Label extraction: \(training.labelExtractionSource ?? "none")")
+            print("      - User final model: \(training.userFinalModelNumber ?? "nil")")
+            print("      - User final serial: \(training.userFinalSerialNumber ?? "nil")")
         } else {
             print("   Training data: none")
         }

@@ -61,17 +61,19 @@ public struct OCRField: Codable, Sendable, Equatable {
 public struct OCRFields: Codable, Sendable, Equatable {
     public var modelNumber: OCRField?
     public var serialNumber: OCRField?
+    public var brand: OCRField?
     public var manufacturer: OCRField?
     public var manufactureDate: OCRField?
     public var voltage: OCRField?
     public var wattage: OCRField?
-    
+
     /// Raw OCR text for training/debugging
     public var rawText: String?
-    
+
     public init(
         modelNumber: OCRField? = nil,
         serialNumber: OCRField? = nil,
+        brand: OCRField? = nil,
         manufacturer: OCRField? = nil,
         manufactureDate: OCRField? = nil,
         voltage: OCRField? = nil,
@@ -80,6 +82,7 @@ public struct OCRFields: Codable, Sendable, Equatable {
     ) {
         self.modelNumber = modelNumber
         self.serialNumber = serialNumber
+        self.brand = brand
         self.manufacturer = manufacturer
         self.manufactureDate = manufactureDate
         self.voltage = voltage
@@ -99,17 +102,24 @@ public struct LabelScanResult: Equatable {
     public let ocrFields: OCRFields
     public var labelLocation: LabelLocation?
     public let labelLocationSource: LabelLocationSource
-    
+    public let extractionSource: String  // "gemini" or "heuristic"
+    /// Free-text description when user selects "Other" — collected for training data analysis
+    public var customLocationDescription: String?
+
     public init(
         labelImage: UIImage,
         ocrFields: OCRFields,
         labelLocation: LabelLocation? = nil,
-        labelLocationSource: LabelLocationSource = .pending
+        labelLocationSource: LabelLocationSource = .pending,
+        extractionSource: String = "heuristic",
+        customLocationDescription: String? = nil
     ) {
         self.labelImage = labelImage
         self.ocrFields = ocrFields
         self.labelLocation = labelLocation
         self.labelLocationSource = labelLocationSource
+        self.extractionSource = extractionSource
+        self.customLocationDescription = customLocationDescription
     }
 }
 

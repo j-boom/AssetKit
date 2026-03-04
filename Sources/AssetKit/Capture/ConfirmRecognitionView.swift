@@ -16,9 +16,9 @@ public struct ConfirmRecognitionView: View {
     
     @EnvironmentObject private var knowledgeBase: ApplianceKnowledgeBase
     @State private var selectedCategory: ApplianceCategory
-    @State private var selectedManufacturer: String
+    @State private var selectedBrand: String
     @State private var showCategoryPicker = false
-    @State private var showManufacturerPicker = false
+    @State private var showBrandPicker = false
     
     public init(
         result: RecognitionResult,
@@ -31,7 +31,7 @@ public struct ConfirmRecognitionView: View {
         self.onRetry = onRetry
         self.onSkipToForm = onSkipToForm
         self._selectedCategory = State(initialValue: result.category)
-        self._selectedManufacturer = State(initialValue: result.manufacturer ?? "")
+        self._selectedBrand = State(initialValue: result.brand ?? "")
     }
     
     private var categoryDisplayName: String {
@@ -88,13 +88,13 @@ public struct ConfirmRecognitionView: View {
                     .foregroundStyle(.primary)
                 }
                 
-                // Manufacturer if detected
-                if !selectedManufacturer.isEmpty {
+                // Brand if detected
+                if !selectedBrand.isEmpty {
                     Button {
-                        showManufacturerPicker = true
+                        showBrandPicker = true
                     } label: {
                         HStack {
-                            Text("by \(selectedManufacturer)")
+                            Text("by \(selectedBrand)")
                                 .font(.title3)
                             Image(systemName: "chevron.down")
                                 .font(.caption2)
@@ -118,9 +118,11 @@ public struct ConfirmRecognitionView: View {
                 Button {
                     let confirmed = RecognitionResult(
                         category: selectedCategory,
-                        manufacturer: selectedManufacturer.isEmpty ? nil : selectedManufacturer,
+                        brand: selectedBrand.isEmpty ? nil : selectedBrand,
+                        manufacturer: result.manufacturer,
                         confidence: result.confidence,
-                        capturedImage: result.capturedImage
+                        capturedImage: result.capturedImage,
+                        boundingBox: result.boundingBox
                     )
                     onConfirm(confirmed)
                 } label: {
@@ -148,9 +150,9 @@ public struct ConfirmRecognitionView: View {
                 categories: knowledgeBase.allCategories()
             )
         }
-        .sheet(isPresented: $showManufacturerPicker) {
-            ManufacturerPickerSheet(
-                selectedManufacturer: $selectedManufacturer,
+        .sheet(isPresented: $showBrandPicker) {
+            BrandPickerSheet(
+                selectedBrand: $selectedBrand,
                 category: selectedCategory
             )
         }
@@ -194,33 +196,33 @@ private struct CategoryPickerSheet: View {
     }
 }
 
-// MARK: - Manufacturer Picker
+// MARK: - Brand Picker
 
-private struct ManufacturerPickerSheet: View {
-    @Binding var selectedManufacturer: String
+private struct BrandPickerSheet: View {
+    @Binding var selectedBrand: String
     let category: ApplianceCategory
     @EnvironmentObject private var knowledgeBase: ApplianceKnowledgeBase
     @Environment(\.dismiss) private var dismiss
-    @State private var customManufacturer = ""
-    
-    private var manufacturers: [String] {
+    @State private var customBrand = ""
+
+    private var brands: [String] {
         knowledgeBase.knowledge(for: category)?.commonManufacturers ?? []
     }
-    
+
     var body: some View {
         NavigationStack {
             List {
                 Section {
-                    ForEach(manufacturers, id: \.self) { (manufacturer: String) in
+                    ForEach(brands, id: \.self) { (brand: String) in
                         Button {
-                            selectedManufacturer = manufacturer.capitalized
+                            selectedBrand = brand.capitalized
                             dismiss()
                         } label: {
                             HStack {
-                                Text(manufacturer.capitalized)
+                                Text(brand.capitalized)
                                     .foregroundStyle(.primary)
                                 Spacer()
-                                if manufacturer.lowercased() == selectedManufacturer.lowercased() {
+                                if brand.lowercased() == selectedBrand.lowercased() {
                                     Image(systemName: "checkmark")
                                         .foregroundStyle(Color.accentColor)
                                 }
@@ -228,19 +230,19 @@ private struct ManufacturerPickerSheet: View {
                         }
                     }
                 }
-                
+
                 Section("Other") {
                     HStack {
-                        TextField("Enter manufacturer", text: $customManufacturer)
+                        TextField("Enter brand", text: $customBrand)
                         Button("Add") {
-                            selectedManufacturer = customManufacturer
+                            selectedBrand = customBrand
                             dismiss()
                         }
-                        .disabled(customManufacturer.isEmpty)
+                        .disabled(customBrand.isEmpty)
                     }
                 }
             }
-            .navigationTitle("Select Manufacturer")
+            .navigationTitle("Select Brand")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {

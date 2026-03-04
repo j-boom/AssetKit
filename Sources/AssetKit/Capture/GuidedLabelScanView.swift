@@ -8,6 +8,9 @@
 import SwiftUI
 import AVFoundation
 import Vision
+import os.log
+
+private let ocrLog = Logger(subsystem: "com.castlemindr.AssetKit", category: "OCR")
 
 public struct GuidedLabelScanView: View {
     let recognition: RecognitionResult
@@ -19,10 +22,14 @@ public struct GuidedLabelScanView: View {
     
     @State private var capturedImage: UIImage?
     @State private var isProcessing = false
+    @State private var processingStage = "Reading label..."
     @State private var detectedModel = ""
     @State private var detectedSerial = ""
+    @State private var detectedManufacturer = ""
     @State private var rawOCRText = ""
     @State private var errorMessage: String?
+    @State private var extractionSource = "heuristic"
+    @State private var geminiFields: OCRFields?
     
     public init(
         recognition: RecognitionResult,
@@ -37,7 +44,7 @@ public struct GuidedLabelScanView: View {
     private var guidancePrompt: String {
         knowledgeBase.guidancePrompt(
             for: recognition.category,
-            manufacturer: recognition.manufacturer
+            manufacturer: recognition.brand
         )
     }
     
@@ -60,7 +67,7 @@ public struct GuidedLabelScanView: View {
                     ProgressView()
                         .scaleEffect(1.5)
                         .tint(.white)
-                    Text("Reading label...")
+                    Text(processingStage)
                         .font(.headline)
                         .foregroundStyle(.white)
                 }
@@ -216,11 +223,31 @@ public struct GuidedLabelScanView: View {
             }
             
             // Skip option
-            Button("No label on this item") {
-                onSkip()
+            if #available(iOS 26.0, *) {
+                Button {
+                    onSkip()
+                } label: {
+                    Text("No Label on This Item")
+                        .font(.body)
+                        .fontWeight(.medium)
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 24)
+                        .padding(.vertical, 10)
+                }
+                .glassEffect(.regular.interactive(), in: .capsule)
+            } else {
+                Button {
+                    onSkip()
+                } label: {
+                    Text("No Label on This Item")
+                        .font(.body)
+                        .fontWeight(.medium)
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 24)
+                        .padding(.vertical, 10)
+                        .background(Capsule().fill(Color.white.opacity(0.2)))
+                }
             }
-            .font(.subheadline)
-            .foregroundStyle(.white.opacity(0.6))
         }
     }
     
@@ -251,23 +278,45 @@ public struct GuidedLabelScanView: View {
         
         let request = VNRecognizeTextRequest { request, error in
             DispatchQueue.main.async {
-                self.isProcessing = false
-                
                 if let error {
+                    self.isProcessing = false
                     self.errorMessage = "OCR failed: \(error.localizedDescription)"
                     return
                 }
-                
+
                 guard let observations = request.results as? [VNRecognizedTextObservation] else {
+                    self.isProcessing = false
+                    ocrLog.warning("⚠️ No text observations returned from Vision")
                     return
                 }
-                
-                let allText = observations.compactMap { observation in
-                    observation.topCandidates(1).first?.string
+
+                ocrLog.info("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+                ocrLog.info("📷 OCR SCAN — \(observations.count) text observation(s)")
+                ocrLog.info("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+
+                var allText: [String] = []
+                for (i, observation) in observations.enumerated() {
+                    let candidates = observation.topCandidates(3)
+                    let topText = candidates.first?.string ?? "(empty)"
+                    let topConf = candidates.first?.confidence ?? 0
+
+                    allText.append(topText)
+
+                    let altCandidates = candidates.dropFirst().map { "\"\($0.string)\" (\(String(format: "%.0f%%", $0.confidence * 100)))" }.joined(separator: ", ")
+                    let altStr = altCandidates.isEmpty ? "none" : altCandidates
+
+                    ocrLog.info("  [\(i)] \"\(topText)\" — confidence: \(String(format: "%.0f%%", topConf * 100)) | alts: \(altStr)")
                 }
-                
+
+                ocrLog.info("──────────────────────────────────────────")
+                ocrLog.info("📝 RAW TEXT DUMP:")
+                ocrLog.info("\(allText.joined(separator: "\n"))")
+                ocrLog.info("──────────────────────────────────────────")
+
                 self.rawOCRText = allText.joined(separator: "\n")
-                self.parseFields(from: allText)
+
+                // Try Gemini extraction first, fall back to heuristic parsing
+                self.extractFieldsWithGemini(ocrLines: allText)
             }
         }
         
@@ -291,82 +340,267 @@ public struct GuidedLabelScanView: View {
     private func parseFields(from lines: [String]) {
         let knowledge = knowledgeBase.knowledge(for: recognition.category)
         let patterns = knowledge?.fieldPatterns ?? []
-        
-        for line in lines {
+
+        let modelHints = ["MODEL:", "MODEL ", "MOD:", "MOD ", "M/N:", "M/N ", "MODEL NO", "MODEL NUMBER"]
+        let serialHints = ["SERIAL:", "SERIAL ", "SER:", "SER ", "S/N:", "S/N ", "SERIAL NO", "SERIAL NUMBER"]
+
+        ocrLog.info("🔍 PARSING — category: \(self.recognition.category.rawValue), \(patterns.count) pattern(s) loaded")
+
+        // Track which lines have been claimed by hint-based extraction
+        var claimedLines: Set<Int> = []
+
+        // Pending hint: a hint was found on a line but no value followed on the same line.
+        // The value is likely on the next line.
+        var pendingField: String? = nil  // "model" or "serial"
+
+        // ── Pass 1: Hint-based extraction (with multi-line lookahead) ──
+
+        for (i, line) in lines.enumerated() {
             let trimmed = line.trimmingCharacters(in: .whitespaces)
             let upper = trimmed.uppercased()
-            
-            // Check for model number
+
+            ocrLog.info("  LINE[\(i)]: \"\(trimmed)\"")
+
+            // If previous line left a pending hint, this line is the value
+            if let pending = pendingField {
+                let cleaned = trimmed
+                    .trimmingCharacters(in: CharacterSet(charactersIn: ":.-# "))
+                    .trimmingCharacters(in: .whitespaces)
+
+                if cleaned.count >= 3 && cleaned.count <= 50 {
+                    if pending == "model" && detectedModel.isEmpty {
+                        detectedModel = cleaned
+                        claimedLines.insert(i)
+                        ocrLog.info("  ✅ MODEL from pending hint (next line[\(i)]): \"\(cleaned)\"")
+                    } else if pending == "serial" && detectedSerial.isEmpty {
+                        detectedSerial = cleaned
+                        claimedLines.insert(i)
+                        ocrLog.info("  ✅ SERIAL from pending hint (next line[\(i)]): \"\(cleaned)\"")
+                    }
+                } else {
+                    ocrLog.info("  ⏭️ Pending \(pending) — next line too short/long (\(cleaned.count) chars), skipping")
+                }
+                pendingField = nil
+            }
+
+            // Check for model hint
             if detectedModel.isEmpty {
-                if let model = extractField(from: trimmed, upper: upper, fieldName: "model", patterns: patterns, hints: ["MODEL:", "MODEL ", "MOD:", "MOD ", "M/N:", "M/N ", "MODEL NO", "MODEL NUMBER"]) {
-                    detectedModel = model
+                if let result = extractHintValue(from: trimmed, upper: upper, hints: modelHints) {
+                    switch result {
+                    case .value(let v):
+                        detectedModel = v
+                        claimedLines.insert(i)
+                        ocrLog.info("  ✅ MODEL extracted from line[\(i)]: \"\(v)\"")
+                    case .hintOnly:
+                        pendingField = "model"
+                        claimedLines.insert(i)
+                        ocrLog.info("  ⏳ MODEL hint found on line[\(i)] but no value — checking next line")
+                    }
                 }
             }
-            
-            // Check for serial number
+
+            // Check for serial hint
             if detectedSerial.isEmpty {
-                if let serial = extractField(from: trimmed, upper: upper, fieldName: "serial", patterns: patterns, hints: ["SERIAL:", "SERIAL ", "SER:", "SER ", "S/N:", "S/N ", "SERIAL NO", "SERIAL NUMBER"]) {
-                    detectedSerial = serial
-                }
-            }
-        }
-    }
-    
-    private func extractField(from line: String, upper: String, fieldName: String, patterns: [FieldPattern], hints: [String]) -> String? {
-        // Check if line contains a hint
-        for hint in hints {
-            if upper.contains(hint) {
-                // Extract value after the hint
-                if let hintRange = upper.range(of: hint) {
-                    let afterHint = String(line[hintRange.upperBound...]).trimmingCharacters(in: .whitespaces)
-                    // Clean up common separators at the start
-                    let cleaned = afterHint
-                        .trimmingCharacters(in: CharacterSet(charactersIn: ":.-# "))
-                        .trimmingCharacters(in: .whitespaces)
-                    
-                    if cleaned.count >= 3 && cleaned.count <= 50 {
-                        return cleaned
+                if let result = extractHintValue(from: trimmed, upper: upper, hints: serialHints) {
+                    switch result {
+                    case .value(let v):
+                        detectedSerial = v
+                        claimedLines.insert(i)
+                        ocrLog.info("  ✅ SERIAL extracted from line[\(i)]: \"\(v)\"")
+                    case .hintOnly:
+                        pendingField = "serial"
+                        claimedLines.insert(i)
+                        ocrLog.info("  ⏳ SERIAL hint found on line[\(i)] but no value — checking next line")
                     }
                 }
             }
         }
-        
-        // Try regex patterns from knowledge base
+
+        // ── Pass 2: Regex-based extraction on unclaimed lines ──
+
+        if !patterns.isEmpty && (detectedModel.isEmpty || detectedSerial.isEmpty) {
+            ocrLog.info("  📐 Pass 2: regex patterns on unclaimed lines...")
+
+            for (i, line) in lines.enumerated() {
+                guard !claimedLines.contains(i) else { continue }
+
+                let trimmed = line.trimmingCharacters(in: .whitespaces)
+
+                if detectedModel.isEmpty {
+                    if let model = extractRegex(from: trimmed, fieldName: "model", patterns: patterns) {
+                        detectedModel = model
+                        claimedLines.insert(i)
+                        ocrLog.info("  ✅ MODEL (regex) from line[\(i)]: \"\(model)\"")
+                    }
+                }
+
+                if detectedSerial.isEmpty {
+                    if let serial = extractRegex(from: trimmed, fieldName: "serial", patterns: patterns) {
+                        // Dedup guard: don't let serial be the same as model
+                        if serial == detectedModel {
+                            ocrLog.info("  ⛔ SERIAL (regex) from line[\(i)]: \"\(serial)\" — REJECTED (same as model)")
+                        } else {
+                            detectedSerial = serial
+                            claimedLines.insert(i)
+                            ocrLog.info("  ✅ SERIAL (regex) from line[\(i)]: \"\(serial)\"")
+                        }
+                    }
+                }
+            }
+        }
+
+        ocrLog.info("──────────────────────────────────────────")
+        ocrLog.info("📋 PARSE RESULT — model: \"\(self.detectedModel.isEmpty ? "(none)" : self.detectedModel)\" | serial: \"\(self.detectedSerial.isEmpty ? "(none)" : self.detectedSerial)\"")
+        ocrLog.info("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+    }
+
+    // MARK: - Hint Extraction
+
+    private enum HintResult {
+        case value(String)  // Hint found and value extracted on same line
+        case hintOnly       // Hint found but no value — check next line
+    }
+
+    private func extractHintValue(from line: String, upper: String, hints: [String]) -> HintResult? {
+        for hint in hints {
+            if upper.contains(hint) {
+                if let hintRange = upper.range(of: hint) {
+                    let afterHint = String(line[hintRange.upperBound...]).trimmingCharacters(in: .whitespaces)
+                    let cleaned = afterHint
+                        .trimmingCharacters(in: CharacterSet(charactersIn: ":.-# "))
+                        .trimmingCharacters(in: .whitespaces)
+
+                    if cleaned.count >= 3 && cleaned.count <= 50 {
+                        ocrLog.info("    🏷️ hint \"\(hint)\" → value: \"\(cleaned)\" ✅")
+                        return .value(cleaned)
+                    } else {
+                        ocrLog.info("    🏷️ hint \"\(hint)\" → afterHint: \"\(cleaned)\" (len \(cleaned.count)) — hint only")
+                        return .hintOnly
+                    }
+                }
+            }
+        }
+        return nil
+    }
+
+    // MARK: - Regex Extraction
+
+    private func extractRegex(from line: String, fieldName: String, patterns: [FieldPattern]) -> String? {
         for pattern in patterns where pattern.fieldName == fieldName {
             if let regex = try? NSRegularExpression(pattern: pattern.regex, options: .caseInsensitive) {
                 let range = NSRange(line.startIndex..., in: line)
                 if let match = regex.firstMatch(in: line, options: [], range: range) {
                     if let matchRange = Range(match.range, in: line) {
-                        return String(line[matchRange])
+                        let matched = String(line[matchRange])
+                        ocrLog.info("    🔣 [\(fieldName)] regex /\(pattern.regex)/ matched: \"\(matched)\"")
+                        return matched
                     }
                 }
             }
         }
-        
         return nil
     }
     
+    private func extractFieldsWithGemini(ocrLines: [String]) {
+        guard let image = capturedImage else {
+            // No image — fall back to heuristic
+            parseFields(from: ocrLines)
+            isProcessing = false
+            return
+        }
+
+        processingStage = "Analyzing with AI..."
+        ocrLog.info("🤖 Attempting Gemini label extraction...")
+
+        Task {
+            do {
+                let result = try await LabelExtractionService.shared.extractFields(
+                    image: image,
+                    ocrText: rawOCRText,
+                    category: recognition.category,
+                    brand: recognition.brand
+                )
+
+                await MainActor.run {
+                    ocrLog.info("🤖 Gemini extraction succeeded:")
+                    ocrLog.info("   model: \(result.modelNumber ?? "(nil)")")
+                    ocrLog.info("   serial: \(result.serialNumber ?? "(nil)")")
+                    ocrLog.info("   manufacturer: \(result.manufacturer ?? "(nil)")")
+                    ocrLog.info("   brand: \(result.brand ?? "(nil)")")
+                    ocrLog.info("   confidence: \(String(format: "%.0f%%", result.confidence * 100))")
+
+                    // Populate fields from Gemini result
+                    extractionSource = "gemini"
+                    geminiFields = result.toOCRFields(rawText: rawOCRText)
+
+                    if let model = result.modelNumber, !model.isEmpty {
+                        detectedModel = model
+                    }
+                    if let serial = result.serialNumber, !serial.isEmpty {
+                        detectedSerial = serial
+                    }
+                    if let mfr = result.manufacturer, !mfr.isEmpty {
+                        detectedManufacturer = mfr
+                    }
+
+                    isProcessing = false
+                }
+            } catch {
+                await MainActor.run {
+                    ocrLog.warning("🤖 Gemini extraction failed: \(error.localizedDescription)")
+                    ocrLog.info("📝 Falling back to heuristic parsing...")
+
+                    // Fall back to heuristic parsing
+                    extractionSource = "heuristic"
+                    geminiFields = nil
+                    parseFields(from: ocrLines)
+                    isProcessing = false
+                }
+            }
+        }
+    }
+
     private func resetCapture() {
         capturedImage = nil
         detectedModel = ""
         detectedSerial = ""
+        detectedManufacturer = ""
         rawOCRText = ""
         errorMessage = nil
+        extractionSource = "heuristic"
+        geminiFields = nil
+        processingStage = "Reading label..."
     }
     
     private func submitResult() {
-        let ocrFields = OCRFields(
-            modelNumber: detectedModel.isEmpty ? nil : OCRField(text: detectedModel),
-            serialNumber: detectedSerial.isEmpty ? nil : OCRField(text: detectedSerial),
-            rawText: rawOCRText.isEmpty ? nil : rawOCRText
-        )
-        
+        // Use Gemini-extracted fields if available, otherwise build from detected values
+        let ocrFields: OCRFields
+        if let geminiFields {
+            // Gemini fields already have full structure; override with any user edits
+            var fields = geminiFields
+            if !detectedModel.isEmpty {
+                fields.modelNumber = OCRField(text: detectedModel, confidence: geminiFields.modelNumber?.confidence ?? 0.8)
+            }
+            if !detectedSerial.isEmpty {
+                fields.serialNumber = OCRField(text: detectedSerial, confidence: geminiFields.serialNumber?.confidence ?? 0.8)
+            }
+            ocrFields = fields
+        } else {
+            ocrFields = OCRFields(
+                modelNumber: detectedModel.isEmpty ? nil : OCRField(text: detectedModel),
+                serialNumber: detectedSerial.isEmpty ? nil : OCRField(text: detectedSerial),
+                manufacturer: detectedManufacturer.isEmpty ? nil : OCRField(text: detectedManufacturer),
+                rawText: rawOCRText.isEmpty ? nil : rawOCRText
+            )
+        }
+
         let result = LabelScanResult(
             labelImage: capturedImage ?? UIImage(),
             ocrFields: ocrFields,
-            labelLocationSource: .pending
+            labelLocationSource: .pending,
+            extractionSource: extractionSource
         )
-        
+
         onComplete(result)
     }
 }

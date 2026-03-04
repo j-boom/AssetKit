@@ -27,6 +27,7 @@ public enum AssetCaptureFlowState {
 public struct AssetFormData {
     public var name: String
     public var category: ApplianceCategory
+    public var brand: String
     public var manufacturer: String
     public var modelNumber: String
     public var serialNumber: String
@@ -35,14 +36,15 @@ public struct AssetFormData {
     public var notes: String
     public var applianceImage: UIImage?
     public var labelImage: UIImage?
-    
+
     // For training data
     public var originalRecognition: RecognitionResult?
     public var labelScan: LabelScanResult?
-    
+
     public init(
         name: String = "",
         category: ApplianceCategory = .unknown,
+        brand: String = "",
         manufacturer: String = "",
         modelNumber: String = "",
         serialNumber: String = "",
@@ -56,6 +58,7 @@ public struct AssetFormData {
     ) {
         self.name = name
         self.category = category
+        self.brand = brand
         self.manufacturer = manufacturer
         self.modelNumber = modelNumber
         self.serialNumber = serialNumber
@@ -67,20 +70,21 @@ public struct AssetFormData {
         self.originalRecognition = originalRecognition
         self.labelScan = labelScan
     }
-    
+
     public static func from(recognition: RecognitionResult) -> AssetFormData {
         AssetFormData(
             category: recognition.category,
-            manufacturer: recognition.manufacturer ?? "",
+            brand: recognition.brand ?? "",
             applianceImage: recognition.capturedImage,
             originalRecognition: recognition
         )
     }
-    
+
     public static func from(recognition: RecognitionResult, labelScan: LabelScanResult?) -> AssetFormData {
         AssetFormData(
             category: recognition.category,
-            manufacturer: labelScan?.ocrFields.manufacturer?.text ?? recognition.manufacturer ?? "",
+            brand: recognition.brand ?? "",
+            manufacturer: labelScan?.ocrFields.manufacturer?.text ?? "",
             modelNumber: labelScan?.ocrFields.modelNumber?.text ?? "",
             serialNumber: labelScan?.ocrFields.serialNumber?.text ?? "",
             applianceImage: recognition.capturedImage,
@@ -110,12 +114,43 @@ public struct AssetCaptureView: View {
     
     public var body: some View {
         NavigationStack(path: $navigationPath) {
-            EntryPointSelectionView(
-                onScanAppliance: { startObjectRecognition() },
-                onScanReceipt: { /* CAS-91 */ },
-                onEnterManually: { startManualEntry() },
-                onCancel: { coordinator.cancel() }
-            )
+            Group {
+                if case .scanLabel(_, let asset) = coordinator.context {
+                    // Jump directly to label scan for existing assets
+                    GuidedLabelScanView(
+                        recognition: RecognitionResult(
+                            category: asset.type,
+                            brand: asset.brand,
+                            confidence: 1.0,
+                            capturedImage: nil
+                        ),
+                        onComplete: { labelScanResult in
+                            var formData = AssetFormData(
+                                name: asset.name,
+                                category: asset.type,
+                                brand: asset.brand ?? "",
+                                manufacturer: labelScanResult.ocrFields.manufacturer?.text ?? asset.manufacturer ?? "",
+                                modelNumber: labelScanResult.ocrFields.modelNumber?.text ?? "",
+                                serialNumber: labelScanResult.ocrFields.serialNumber?.text ?? "",
+                                labelImage: labelScanResult.labelImage,
+                                labelScan: labelScanResult
+                            )
+                            formData.originalRecognition = nil
+                            navigationPath.append(AssetCaptureFlowState.form(formData))
+                        },
+                        onSkip: {
+                            coordinator.cancel()
+                        }
+                    )
+                } else {
+                    EntryPointSelectionView(
+                        onScanAppliance: { startObjectRecognition() },
+                        onScanReceipt: { /* CAS-91 */ },
+                        onEnterManually: { startManualEntry() },
+                        onCancel: { coordinator.cancel() }
+                    )
+                }
+            }
             .navigationDestination(for: AssetCaptureFlowState.self) { state in
                 destinationView(for: state)
             }
@@ -180,16 +215,16 @@ public struct AssetCaptureView: View {
         case .labelLocationPicker(let recognition, let labelScanResult):
             LabelLocationPickerView(
                 category: recognition.category,
-                onSelect: { location in
-                    var updatedScan = labelScanResult
-                    updatedScan.labelLocation = location
+                onSelect: { location, customDescription in
                     let formData = AssetFormData.from(
                         recognition: recognition,
                         labelScan: LabelScanResult(
                             labelImage: labelScanResult.labelImage,
                             ocrFields: labelScanResult.ocrFields,
                             labelLocation: location,
-                            labelLocationSource: .userSelected
+                            labelLocationSource: .userSelected,
+                            extractionSource: labelScanResult.extractionSource,
+                            customLocationDescription: customDescription
                         )
                     )
                     navigationPath.append(AssetCaptureFlowState.form(formData))
@@ -201,7 +236,8 @@ public struct AssetCaptureView: View {
                             labelImage: labelScanResult.labelImage,
                             ocrFields: labelScanResult.ocrFields,
                             labelLocation: nil,
-                            labelLocationSource: .skipped
+                            labelLocationSource: .skipped,
+                            extractionSource: labelScanResult.extractionSource
                         )
                     )
                     navigationPath.append(AssetCaptureFlowState.form(formData))

@@ -89,15 +89,25 @@ public actor TrainingSampleService {
             "aiConfidence": sample.aiConfidence,
             "wasCloudUsed": sample.wasCloudUsed,
             "userCorrectedCategory": sample.userCorrectedCategory,
+            "userCorrectedBrand": sample.userCorrectedBrand,
             "userCorrectedManufacturer": sample.userCorrectedManufacturer,
+            "userCorrectedModelNumber": sample.userCorrectedModelNumber,
+            "userCorrectedSerialNumber": sample.userCorrectedSerialNumber,
+            "userCorrectedOCRManufacturer": sample.userCorrectedOCRManufacturer,
             "labelLocationSource": sample.labelLocationSource,
             "deviceModel": sample.deviceModel,
             "osVersion": sample.osVersion,
             "appVersion": sample.appVersion
         ]
-        
+
+        if let brand = sample.brand {
+            dict["brand"] = brand
+        }
         if let manufacturer = sample.manufacturer {
             dict["manufacturer"] = manufacturer
+        }
+        if let aiPredictedBrand = sample.aiPredictedBrand {
+            dict["aiPredictedBrand"] = aiPredictedBrand
         }
         if let aiPredictedManufacturer = sample.aiPredictedManufacturer {
             dict["aiPredictedManufacturer"] = aiPredictedManufacturer
@@ -113,24 +123,45 @@ public actor TrainingSampleService {
         if let labelLocation = sample.labelLocation {
             dict["labelLocation"] = labelLocation
         }
+        if let customDesc = sample.customLocationDescription {
+            dict["customLocationDescription"] = customDesc
+        }
         if let ocrRawText = sample.ocrRawText {
             dict["ocrRawText"] = ocrRawText
         }
         if let ocrFields = sample.ocrFields {
             dict["ocrFields"] = encodeOCRFields(ocrFields)
         }
-        
+        if let userFinalModel = sample.userFinalModelNumber {
+            dict["userFinalModelNumber"] = userFinalModel
+        }
+        if let userFinalSerial = sample.userFinalSerialNumber {
+            dict["userFinalSerialNumber"] = userFinalSerial
+        }
+        if let userFinalMfr = sample.userFinalManufacturer {
+            dict["userFinalManufacturer"] = userFinalMfr
+        }
+        if let userFinalBrand = sample.userFinalBrand {
+            dict["userFinalBrand"] = userFinalBrand
+        }
+        if let source = sample.labelExtractionSource {
+            dict["labelExtractionSource"] = source
+        }
+
         return dict
     }
     
     private func encodeOCRFields(_ fields: OCRFieldsDTO) -> [String: Any] {
         var dict: [String: Any] = [:]
-        
+
         if let f = fields.modelNumber { dict["modelNumber"] = encodeOCRField(f) }
         if let f = fields.serialNumber { dict["serialNumber"] = encodeOCRField(f) }
+        if let f = fields.brand { dict["brand"] = encodeOCRField(f) }
         if let f = fields.manufacturer { dict["manufacturer"] = encodeOCRField(f) }
         if let f = fields.manufactureDate { dict["manufactureDate"] = encodeOCRField(f) }
-        
+        if let f = fields.voltage { dict["voltage"] = encodeOCRField(f) }
+        if let f = fields.wattage { dict["wattage"] = encodeOCRField(f) }
+
         return dict
     }
     

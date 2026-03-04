@@ -137,11 +137,31 @@ public struct ObjectRecognitionView: View {
                     .disabled(!camera.isAuthorized)
                     
                     // Skip option
-                    Button("Enter manually") {
-                        onSkip()
+                    if #available(iOS 26.0, *) {
+                        Button {
+                            onSkip()
+                        } label: {
+                            Text("Enter Manually")
+                                .font(.body)
+                                .fontWeight(.medium)
+                                .foregroundStyle(.white)
+                                .padding(.horizontal, 24)
+                                .padding(.vertical, 10)
+                        }
+                        .glassEffect(.regular.interactive(), in: .capsule)
+                    } else {
+                        Button {
+                            onSkip()
+                        } label: {
+                            Text("Enter Manually")
+                                .font(.body)
+                                .fontWeight(.medium)
+                                .foregroundStyle(.white)
+                                .padding(.horizontal, 24)
+                                .padding(.vertical, 10)
+                                .background(Capsule().fill(Color.white.opacity(0.2)))
+                        }
                     }
-                    .font(.subheadline)
-                    .foregroundStyle(.white.opacity(0.8))
                 }
                 .padding(.bottom, 40)
             }
@@ -204,6 +224,7 @@ public struct ObjectRecognitionView: View {
                 // but store bounding box info for training
                 result = RecognitionResult(
                     category: result.category,
+                    brand: result.brand,
                     manufacturer: result.manufacturer,
                     confidence: result.confidence,
                     capturedImage: capturedImage,  // Full image

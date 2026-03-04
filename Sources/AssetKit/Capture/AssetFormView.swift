@@ -18,6 +18,7 @@ public struct AssetFormView: View {
     
     @State private var name: String
     @State private var category: ApplianceCategory
+    @State private var brand: String
     @State private var manufacturer: String
     @State private var modelNumber: String
     @State private var serialNumber: String
@@ -43,6 +44,7 @@ public struct AssetFormView: View {
         
         _name = State(initialValue: initialData.name)
         _category = State(initialValue: initialData.category)
+        _brand = State(initialValue: initialData.brand)
         _manufacturer = State(initialValue: initialData.manufacturer)
         _modelNumber = State(initialValue: initialData.modelNumber)
         _serialNumber = State(initialValue: initialData.serialNumber)
@@ -58,8 +60,8 @@ public struct AssetFormView: View {
     
     private var generatedName: String {
         if !name.isEmpty { return name }
-        let mfr = manufacturer.isEmpty ? "" : "\(manufacturer) "
-        return "\(mfr)\(categoryDisplayName)"
+        let brandPrefix = brand.isEmpty ? "" : "\(brand) "
+        return "\(brandPrefix)\(categoryDisplayName)"
     }
     
     private var canSave: Bool {
@@ -94,6 +96,17 @@ public struct AssetFormView: View {
                     }
                 }
                 
+                // Brand
+                HStack {
+                    Text("Brand")
+                    Spacer()
+                    TextField("Optional", text: $brand)
+                        .multilineTextAlignment(.trailing)
+                }
+                if !initialData.brand.isEmpty && initialData.brand == brand {
+                    ScannedIndicator()
+                }
+
                 // Manufacturer
                 HStack {
                     Text("Manufacturer")
@@ -232,6 +245,8 @@ public struct AssetFormView: View {
                 return (id, nil)
             case .room(let propId, let roomId):
                 return (propId, roomId)
+            case .scanLabel(let propId, let existingAsset):
+                return (propId, existingAsset.areaId)
             }
         }()
         
@@ -241,6 +256,7 @@ public struct AssetFormView: View {
             propertyId: propertyId,
             type: category,
             areaId: areaId,
+            brand: brand.isEmpty ? nil : brand,
             manufacturer: manufacturer.isEmpty ? nil : manufacturer,
             modelNumber: modelNumber.isEmpty ? nil : modelNumber,
             serialNumber: serialNumber.isEmpty ? nil : serialNumber,
@@ -248,16 +264,22 @@ public struct AssetFormView: View {
             warrantyExpires: warrantyExpires,
             notes: notes.isEmpty ? nil : notes
         )
-        
+
         // Build training sample if we have recognition data
         var trainingSample: TrainingSample? = nil
-        
+
         if let recognition = initialData.originalRecognition {
             trainingSample = TrainingSample.build(
                 recognition: recognition,
                 confirmedCategory: category,
+                confirmedBrand: brand.isEmpty ? nil : brand,
                 confirmedManufacturer: manufacturer.isEmpty ? nil : manufacturer,
-                labelScan: initialData.labelScan
+                labelScan: initialData.labelScan,
+                userFinalModelNumber: modelNumber.isEmpty ? nil : modelNumber,
+                userFinalSerialNumber: serialNumber.isEmpty ? nil : serialNumber,
+                userFinalManufacturer: manufacturer.isEmpty ? nil : manufacturer,
+                userFinalBrand: brand.isEmpty ? nil : brand,
+                labelExtractionSource: initialData.labelScan?.extractionSource
             )
             
             // Crop the image to bounding box for training
