@@ -23,6 +23,16 @@ public final class GeminiUsageTracker {
     /// Default free-tier daily cap
     public var dailyCap: Int = 5
 
+    /// When true, cap is ignored entirely. Set via launch argument
+    /// `-GEMINI_UNLIMITED YES` in Xcode scheme for dev/testing.
+    public var unlimitedOverride: Bool = {
+        #if DEBUG
+        return ProcessInfo.processInfo.arguments.contains("-GEMINI_UNLIMITED")
+        #else
+        return false
+        #endif
+    }()
+
     public init(suiteName: String = "com.castlemindr.AssetKit.usage") {
         self.defaults = UserDefaults(suiteName: suiteName) ?? .standard
     }
@@ -31,10 +41,14 @@ public final class GeminiUsageTracker {
     /// Cap applies to all users — Gemini calls cost real money.
     /// The `isPremium` flag is reserved for future per-tier caps.
     public func canUseGemini(isPremium: Bool = false) -> Bool {
+        if unlimitedOverride {
+            usageLog.info("Gemini usage check: UNLIMITED (dev override)")
+            return true
+        }
         resetIfNewDay()
         let count = defaults.integer(forKey: countKey)
         let allowed = count < dailyCap
-        usageLog.info("Gemini usage check: \(count)/\(self.dailyCap) — \(allowed ? "allowed" : "capped")")
+        usageLog.info("Gemini usage check: \(count)/\(self.dailyCap) — \(allowed ? \"allowed\" : \"capped\")")
         return allowed
     }
 
