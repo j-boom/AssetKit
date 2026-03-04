@@ -158,6 +158,7 @@ public struct AssetCaptureView: View {
         .task {
             await knowledgeBase.loadIfNeeded()
         }
+        .environment(\.isPremium, coordinator.isPremium)
         .environmentObject(knowledgeBase)
     }
     

@@ -25,16 +25,31 @@ public enum AssetCaptureResult {
     case cancelled
 }
 
+// MARK: - Premium Environment Key
+
+private struct IsPremiumKey: EnvironmentKey {
+    static let defaultValue: Bool = false
+}
+
+public extension EnvironmentValues {
+    var isPremium: Bool {
+        get { self[IsPremiumKey.self] }
+        set { self[IsPremiumKey.self] = newValue }
+    }
+}
+
 // MARK: - Coordinator
 
 @MainActor
 public final class AssetCaptureCoordinator: ObservableObject {
-    
+
     public let context: AssetCaptureContext
+    public let isPremium: Bool
     private var onComplete: ((AssetCaptureResult) -> Void)?
-    
-    public init(context: AssetCaptureContext) {
+
+    public init(context: AssetCaptureContext, isPremium: Bool = false) {
         self.context = context
+        self.isPremium = isPremium
     }
     
     public func start(onComplete: @escaping (AssetCaptureResult) -> Void) {

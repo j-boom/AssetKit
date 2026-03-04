@@ -18,6 +18,7 @@ public struct GuidedLabelScanView: View {
     let onSkip: () -> Void
     
     @EnvironmentObject private var knowledgeBase: ApplianceKnowledgeBase
+    @Environment(\.isPremium) private var isPremium
     @StateObject private var camera = CameraController()
     
     @State private var capturedImage: UIImage?
@@ -315,8 +316,8 @@ public struct GuidedLabelScanView: View {
 
                 self.rawOCRText = allText.joined(separator: "\n")
 
-                // Try Gemini extraction first, fall back to heuristic parsing
-                self.extractFieldsWithGemini(ocrLines: allText)
+                // Run heuristic first (free), then Gemini only if needed
+                self.extractFieldsFromLabel(ocrLines: allText)
             }
         }
         
@@ -501,16 +502,60 @@ public struct GuidedLabelScanView: View {
         return nil
     }
     
-    private func extractFieldsWithGemini(ocrLines: [String]) {
-        guard let image = capturedImage else {
-            // No image — fall back to heuristic
-            parseFields(from: ocrLines)
+    // MARK: - Extraction Orchestration
+
+    /// Heuristic-first extraction: run free OCR parsing first, only call Gemini
+    /// if the heuristic is missing model or serial number.
+    private func extractFieldsFromLabel(ocrLines: [String]) {
+        // Step 1: Run heuristic parsing first (free, instant)
+        processingStage = "Reading label..."
+        parseFields(from: ocrLines)
+
+        let heuristicFoundModel = !detectedModel.isEmpty
+        let heuristicFoundSerial = !detectedSerial.isEmpty
+
+        ocrLog.info("🔀 Heuristic result — model: \(heuristicFoundModel) | serial: \(heuristicFoundSerial)")
+
+        // Step 2: If heuristic found BOTH model and serial, we're done
+        if heuristicFoundModel && heuristicFoundSerial {
+            ocrLog.info("✅ Heuristic found both fields — skipping Gemini")
+            extractionSource = "heuristic"
             isProcessing = false
             return
         }
 
-        processingStage = "Analyzing with AI..."
-        ocrLog.info("🤖 Attempting Gemini label extraction...")
+        // Step 3: Check usage cap before calling Gemini
+        guard GeminiUsageTracker.shared.canUseGemini(isPremium: isPremium) else {
+            ocrLog.info("⛔ Gemini daily cap reached — using heuristic-only")
+            extractionSource = "heuristic"
+            isProcessing = false
+            return
+        }
+
+        // Step 4: Heuristic is missing at least one field — try Gemini for enhancement
+        ocrLog.info("🤖 Heuristic incomplete — calling Gemini for enhancement...")
+        enhanceWithGemini(
+            ocrLines: ocrLines,
+            heuristicModel: heuristicFoundModel ? detectedModel : nil,
+            heuristicSerial: heuristicFoundSerial ? detectedSerial : nil
+        )
+    }
+
+    /// Call Gemini to fill in fields the heuristic missed. Does not overwrite
+    /// what the heuristic already found.
+    private func enhanceWithGemini(
+        ocrLines: [String],
+        heuristicModel: String?,
+        heuristicSerial: String?
+    ) {
+        guard let image = capturedImage else {
+            // No image — keep heuristic results as-is
+            extractionSource = "heuristic"
+            isProcessing = false
+            return
+        }
+
+        processingStage = "Enhancing with AI..."
 
         Task {
             do {
@@ -522,38 +567,55 @@ public struct GuidedLabelScanView: View {
                 )
 
                 await MainActor.run {
-                    ocrLog.info("🤖 Gemini extraction succeeded:")
+                    ocrLog.info("🤖 Gemini enhancement succeeded:")
                     ocrLog.info("   model: \(result.modelNumber ?? "(nil)")")
                     ocrLog.info("   serial: \(result.serialNumber ?? "(nil)")")
                     ocrLog.info("   manufacturer: \(result.manufacturer ?? "(nil)")")
                     ocrLog.info("   brand: \(result.brand ?? "(nil)")")
                     ocrLog.info("   confidence: \(String(format: "%.0f%%", result.confidence * 100))")
 
-                    // Populate fields from Gemini result
-                    extractionSource = "gemini"
-                    geminiFields = result.toOCRFields(rawText: rawOCRText)
+                    // Merge: only fill in what heuristic missed
+                    var usedGemini = false
 
-                    if let model = result.modelNumber, !model.isEmpty {
+                    if heuristicModel == nil, let model = result.modelNumber, !model.isEmpty {
                         detectedModel = model
+                        usedGemini = true
+                        ocrLog.info("   📥 model (from Gemini): \(model)")
                     }
-                    if let serial = result.serialNumber, !serial.isEmpty {
+
+                    if heuristicSerial == nil, let serial = result.serialNumber, !serial.isEmpty {
                         detectedSerial = serial
+                        usedGemini = true
+                        ocrLog.info("   📥 serial (from Gemini): \(serial)")
                     }
-                    if let mfr = result.manufacturer, !mfr.isEmpty {
+
+                    // Always accept manufacturer from Gemini if we don't have one
+                    if detectedManufacturer.isEmpty, let mfr = result.manufacturer, !mfr.isEmpty {
                         detectedManufacturer = mfr
+                        usedGemini = true
+                        ocrLog.info("   📥 manufacturer (from Gemini): \(mfr)")
                     }
+
+                    // Track extraction source for training data
+                    if usedGemini {
+                        extractionSource = "heuristic+gemini"
+                        geminiFields = result.toOCRFields(rawText: rawOCRText)
+                    } else {
+                        // Gemini returned nothing new — pure heuristic
+                        extractionSource = "heuristic"
+                    }
+
+                    // Record the Gemini usage (only on success)
+                    GeminiUsageTracker.shared.recordUsage()
 
                     isProcessing = false
                 }
             } catch {
                 await MainActor.run {
-                    ocrLog.warning("🤖 Gemini extraction failed: \(error.localizedDescription)")
-                    ocrLog.info("📝 Falling back to heuristic parsing...")
-
-                    // Fall back to heuristic parsing
+                    ocrLog.warning("🤖 Gemini enhancement failed: \(error.localizedDescription)")
+                    // Keep heuristic results — don't overwrite anything
                     extractionSource = "heuristic"
                     geminiFields = nil
-                    parseFields(from: ocrLines)
                     isProcessing = false
                 }
             }

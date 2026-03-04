@@ -34,6 +34,11 @@ public struct ConfirmRecognitionView: View {
         self._selectedBrand = State(initialValue: result.brand ?? "")
     }
     
+    /// True when AI recognition was skipped (e.g. daily cap reached)
+    private var isManualSelection: Bool {
+        result.confidence == 0 && result.category == .unknown
+    }
+
     private var categoryDisplayName: String {
         // First check knowledge base for known display name
         if let knowledge = knowledgeBase.knowledge(for: selectedCategory) {
@@ -70,24 +75,24 @@ public struct ConfirmRecognitionView: View {
             .clipShape(RoundedRectangle(cornerRadius: 12))
             .padding(.horizontal)
             
-            Text("This looks like a:")
+            Text(isManualSelection ? "What is this item?" : "This looks like a:")
                 .font(.headline)
-            
+
             // Category selection
             VStack(spacing: 12) {
                 Button {
                     showCategoryPicker = true
                 } label: {
                     HStack {
-                        Text(categoryDisplayName)
+                        Text(isManualSelection ? "Select Type" : categoryDisplayName)
                             .font(.title2)
                             .fontWeight(.semibold)
                         Image(systemName: "chevron.down")
                             .font(.caption)
                     }
-                    .foregroundStyle(.primary)
+                    .foregroundStyle(isManualSelection ? .secondary : .primary)
                 }
-                
+
                 // Brand if detected
                 if !selectedBrand.isEmpty {
                     Button {
@@ -102,7 +107,7 @@ public struct ConfirmRecognitionView: View {
                         .foregroundStyle(.secondary)
                     }
                 }
-                
+
                 // Confidence indicator
                 if result.confidence > 0 {
                     Text("\(Int(result.confidence * 100))% confident")
@@ -131,9 +136,12 @@ public struct ConfirmRecognitionView: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.large)
-                
+                .disabled(isManualSelection && selectedCategory == .unknown)
+
                 HStack(spacing: 24) {
-                    Button("Try again", action: onRetry)
+                    if !isManualSelection {
+                        Button("Try again", action: onRetry)
+                    }
                     Button("Skip to form", action: onSkipToForm)
                 }
                 .foregroundStyle(.secondary)

@@ -7,12 +7,16 @@
 
 import SwiftUI
 import AVFoundation
+import os.log
+
+private let recognitionLog = Logger(subsystem: "com.castlemindr.AssetKit", category: "Recognition")
 
 public struct ObjectRecognitionView: View {
     let onRecognized: (RecognitionResult) -> Void
     let onSkip: () -> Void
     let onCancel: () -> Void
-    
+
+    @Environment(\.isPremium) private var isPremium
     @StateObject private var camera = CameraController()
     @State private var viewState: ViewState = .camera
     @State private var capturedImage: UIImage?
@@ -213,13 +217,33 @@ public struct ObjectRecognitionView: View {
     }
     
     private func recognizeItem(_ image: UIImage) {
+        // Check daily Gemini cap before calling the API
+        guard GeminiUsageTracker.shared.canUseGemini(isPremium: isPremium) else {
+            recognitionLog.info("⛔ Gemini daily cap reached — skipping recognition, user will select category manually")
+            // Pass through with the captured image but no AI prediction.
+            // ConfirmRecognitionView's category picker lets the user choose.
+            let manual = RecognitionResult(
+                category: .unknown,
+                brand: nil,
+                confidence: 0,
+                capturedImage: capturedImage,
+                boundingBox: boundingBox
+            )
+            onRecognized(manual)
+            return
+        }
+
         viewState = .processing
         isProcessing = true
-        
+
         Task {
             do {
                 var result = try await RecognitionAPIService.shared.recognize(image)
-                
+
+                // Record usage only after a successful Gemini call
+                GeminiUsageTracker.shared.recordUsage()
+                recognitionLog.info("✅ Gemini recognition used — \(GeminiUsageTracker.shared.todayCount)/\(GeminiUsageTracker.shared.dailyCap) today")
+
                 // Attach the full captured image (not cropped) for the asset
                 // but store bounding box info for training
                 result = RecognitionResult(
@@ -230,7 +254,7 @@ public struct ObjectRecognitionView: View {
                     capturedImage: capturedImage,  // Full image
                     boundingBox: boundingBox       // Where the item is
                 )
-                
+
                 await MainActor.run {
                     isProcessing = false
                     onRecognized(result)
