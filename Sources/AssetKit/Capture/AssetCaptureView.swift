@@ -124,6 +124,7 @@ public struct AssetCaptureView: View {
                             confidence: 1.0,
                             capturedImage: nil
                         ),
+                        skipEntrySelection: true,
                         onComplete: { labelScanResult in
                             var formData = AssetFormData(
                                 name: asset.name,
@@ -249,8 +250,8 @@ public struct AssetCaptureView: View {
             AssetFormView(
                 initialData: formData,
                 context: coordinator.context,
-                onSave: { [coordinator] (asset: Asset, trainingData: LocalTrainingSample?) in
-                    coordinator.complete(with: asset, trainingData: trainingData)
+                onSave: { [coordinator] (asset: Asset, trainingData: LocalTrainingSample?, capturedImage: UIImage?) in
+                    coordinator.complete(with: asset, trainingData: trainingData, capturedImage: capturedImage)
                 },
                 onCancel: { [coordinator] in
                     coordinator.cancel()

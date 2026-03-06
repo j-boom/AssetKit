@@ -9,6 +9,7 @@ import SwiftUI
 import AVFoundation
 import Vision
 import os.log
+import CMCameraKit
 
 private let ocrLog = Logger(subsystem: "com.castlemindr.AssetKit", category: "OCR")
 
@@ -19,7 +20,6 @@ public struct GuidedLabelScanView: View {
     
     @EnvironmentObject private var knowledgeBase: ApplianceKnowledgeBase
     @Environment(\.isPremium) private var isPremium
-    @StateObject private var camera = CameraController()
     
     @State private var capturedImage: UIImage?
     @State private var isProcessing = false
@@ -31,15 +31,19 @@ public struct GuidedLabelScanView: View {
     @State private var errorMessage: String?
     @State private var extractionSource = "heuristic"
     @State private var geminiFields: OCRFields?
-    
+    @State private var isManualEntry = false
+    @State private var showEntrySelection: Bool
+
     public init(
         recognition: RecognitionResult,
+        skipEntrySelection: Bool = false,
         onComplete: @escaping (LabelScanResult) -> Void,
         onSkip: @escaping () -> Void
     ) {
         self.recognition = recognition
         self.onComplete = onComplete
         self.onSkip = onSkip
+        self._showEntrySelection = State(initialValue: !skipEntrySelection)
     }
     
     private var guidancePrompt: String {
@@ -55,71 +59,288 @@ public struct GuidedLabelScanView: View {
     
     public var body: some View {
         ZStack {
-            // Background: camera when capturing, black after capture
-            if capturedImage == nil {
-                CapturableCameraView(controller: camera)
+            if showEntrySelection {
+                // Entry selection — choose between scanning and manual entry
+                entrySelectionView
+            } else if isManualEntry {
+                // Manual entry mode — user types model/serial without scanning
+                manualEntryView
+            } else if capturedImage == nil && !isProcessing {
+                // Phase 1: Camera capture
+                CMCameraView(
+                    configuration: CMCameraConfiguration(
+                        instructionMessage: guidancePrompt,
+                        alternateAction: .init(label: "Enter Manually") { isManualEntry = true }
+                    ),
+                    errorMessage: $errorMessage,
+                    onCapture: { image in
+                        capturedImage = image
+                        isProcessing = true
+                        performOCR(on: image)
+                    },
+                    onCancel: { onSkip() }
+                )
             } else {
+                // Phase 2: Processing / Review
                 Color.black.ignoresSafeArea()
-            }
-            
-            // Processing overlay
-            if isProcessing {
-                VStack(spacing: 16) {
-                    ProgressView()
-                        .scaleEffect(1.5)
-                        .tint(.white)
-                    Text(processingStage)
-                        .font(.headline)
-                        .foregroundStyle(.white)
+
+                if isProcessing {
+                    VStack(spacing: 16) {
+                        ProgressView()
+                            .scaleEffect(1.5)
+                            .tint(.white)
+                        Text(processingStage)
+                            .font(.headline)
+                            .foregroundStyle(.white)
+                    }
                 }
-            }
-            
-            // UI overlay
-            VStack(spacing: 0) {
-                // Top bar with guidance
-                if capturedImage == nil && !isProcessing {
-                    Text(guidancePrompt)
-                        .font(.subheadline)
-                        .foregroundStyle(.white)
-                        .multilineTextAlignment(.center)
-                        .padding(.horizontal, 20)
-                        .padding(.vertical, 12)
-                        .background(RoundedRectangle(cornerRadius: 12).fill(Color.black.opacity(0.7)))
-                        .padding(.horizontal)
-                        .padding(.top, 60)
+
+                VStack(spacing: 0) {
+                    Spacer()
+
+                    if let error = errorMessage {
+                        Text(error)
+                            .font(.caption)
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 8)
+                            .background(Capsule().fill(Color.red.opacity(0.8)))
+                            .padding(.bottom, 8)
+                    }
+
+                    if capturedImage != nil && !isProcessing {
+                        detectedFieldsCard
+                            .padding(.horizontal, 16)
+                            .padding(.bottom, 16)
+                    }
+
+                    reviewControls
+                        .padding(.bottom, 40)
                 }
-                
-                Spacer()
-                
-                // Error message
-                if let error = errorMessage {
-                    Text(error)
-                        .font(.caption)
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 8)
-                        .background(Capsule().fill(Color.red.opacity(0.8)))
-                        .padding(.bottom, 8)
-                }
-                
-                // Detected fields card (shown after scan)
-                if capturedImage != nil && !isProcessing {
-                    detectedFieldsCard
-                        .padding(.horizontal, 16)
-                        .padding(.bottom, 16)
-                }
-                
-                // Bottom controls
-                bottomControls
-                    .padding(.bottom, 40)
             }
         }
         .navigationBarHidden(true)
         .statusBarHidden(true)
     }
     
+    // MARK: - Entry Selection View
+
+    private var entrySelectionView: some View {
+        ZStack {
+            Color.black.ignoresSafeArea()
+
+            VStack(spacing: 0) {
+                // Cancel button
+                HStack {
+                    Button {
+                        onSkip()
+                    } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: "chevron.left")
+                            Text("Back")
+                        }
+                        .font(.body)
+                        .foregroundStyle(.white)
+                    }
+                    .padding(.leading, 16)
+                    .padding(.top, 60)
+
+                    Spacer()
+                }
+
+                Spacer()
+
+                // Title + guidance
+                VStack(spacing: 8) {
+                    Text("Label Information")
+                        .font(.title2)
+                        .fontWeight(.semibold)
+                        .foregroundStyle(.white)
+
+                    Text(guidancePrompt)
+                        .font(.subheadline)
+                        .foregroundStyle(.white.opacity(0.6))
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 32)
+                }
+                .padding(.bottom, 32)
+
+                // Option buttons
+                VStack(spacing: 12) {
+                    labelScanOptionButton(
+                        icon: "camera.fill",
+                        title: "Scan Label",
+                        subtitle: "Use camera to read the label"
+                    ) {
+                        withAnimation(.easeInOut(duration: 0.25)) {
+                            showEntrySelection = false
+                        }
+                    }
+
+                    labelScanOptionButton(
+                        icon: "keyboard",
+                        title: "Enter Manually",
+                        subtitle: "Type model and serial number"
+                    ) {
+                        withAnimation(.easeInOut(duration: 0.25)) {
+                            showEntrySelection = false
+                            isManualEntry = true
+                        }
+                    }
+                }
+                .padding(.horizontal, 24)
+
+                Spacer()
+
+                // Skip button
+                Button {
+                    onSkip()
+                } label: {
+                    Text("No Label on This Item")
+                        .font(.body)
+                        .fontWeight(.medium)
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 24)
+                        .padding(.vertical, 10)
+                        .background(Capsule().fill(Color.white.opacity(0.2)))
+                }
+                .padding(.bottom, 40)
+            }
+        }
+    }
+
+    private func labelScanOptionButton(
+        icon: String,
+        title: String,
+        subtitle: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            HStack(spacing: 16) {
+                Image(systemName: icon)
+                    .font(.title2)
+                    .frame(width: 44, height: 44)
+                    .background(Color.blue.opacity(0.2))
+                    .foregroundStyle(.blue)
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                        .font(.headline)
+                        .foregroundStyle(.white)
+
+                    Text(subtitle)
+                        .font(.subheadline)
+                        .foregroundStyle(.white.opacity(0.6))
+                }
+
+                Spacer()
+
+                Image(systemName: "chevron.right")
+                    .foregroundStyle(.white.opacity(0.3))
+            }
+            .padding()
+            .background(Color.white.opacity(0.1))
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+        }
+    }
+
+    // MARK: - Manual Entry View
+
+    private var manualEntryView: some View {
+        ZStack {
+            Color.black.ignoresSafeArea()
+
+            VStack(spacing: 0) {
+                // Back button
+                HStack {
+                    Button {
+                        isManualEntry = false
+                        showEntrySelection = true
+                        detectedModel = ""
+                        detectedSerial = ""
+                    } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: "chevron.left")
+                            Text("Back")
+                        }
+                        .font(.body)
+                        .foregroundStyle(.white)
+                    }
+                    .padding(.leading, 16)
+                    .padding(.top, 60)
+
+                    Spacer()
+                }
+
+                Spacer()
+
+                // Editable fields card
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("Enter Details")
+                        .font(.headline)
+                        .foregroundStyle(.white)
+
+                    Divider()
+                        .background(Color.white.opacity(0.3))
+
+                    fieldRow(
+                        icon: detectedModel.isEmpty ? "circle" : "checkmark.circle.fill",
+                        iconColor: detectedModel.isEmpty ? .white.opacity(0.5) : .green,
+                        label: "Model",
+                        value: $detectedModel,
+                        placeholder: "Enter model number"
+                    )
+
+                    fieldRow(
+                        icon: detectedSerial.isEmpty ? "circle" : "checkmark.circle.fill",
+                        iconColor: detectedSerial.isEmpty ? .white.opacity(0.5) : .green,
+                        label: "Serial",
+                        value: $detectedSerial,
+                        placeholder: "Enter serial number"
+                    )
+                }
+                .padding(16)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(RoundedRectangle(cornerRadius: 16).fill(Color.black.opacity(0.85)))
+                .clipped()
+                .padding(.horizontal, 16)
+                .padding(.bottom, 16)
+
+                // Buttons
+                VStack(spacing: 16) {
+                    Button {
+                        extractionSource = "manual"
+                        submitResult()
+                    } label: {
+                        Text(hasMinimumData ? "Use this info" : "Continue anyway")
+                            .font(.headline)
+                            .foregroundStyle(.white)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 16)
+                            .background(Capsule().fill(Color.blue))
+                    }
+                    .padding(.horizontal, 24)
+
+                    Button {
+                        onSkip()
+                    } label: {
+                        Text("No Label on This Item")
+                            .font(.body)
+                            .fontWeight(.medium)
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 24)
+                            .padding(.vertical, 10)
+                            .background(Capsule().fill(Color.white.opacity(0.2)))
+                    }
+                }
+                .padding(.bottom, 40)
+            }
+        }
+    }
+
     // MARK: - Detected Fields Card
-    
+
     private var detectedFieldsCard: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Detected Info")
@@ -165,15 +386,25 @@ public struct GuidedLabelScanView: View {
                 Image(systemName: icon)
                     .foregroundStyle(iconColor)
                     .frame(width: 20)
-                
+
                 Text(label)
                     .font(.caption)
                     .foregroundStyle(.white.opacity(0.6))
             }
-            
+
             TextField(placeholder, text: value)
-                .font(.body)
+                .font(.body.monospaced())
                 .foregroundStyle(.white)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 8)
+                .background(
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(Color.white.opacity(0.1))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8)
+                        .strokeBorder(Color.white.opacity(0.25), lineWidth: 1)
+                )
                 .padding(.leading, 28)
                 .lineLimit(1)
                 .truncationMode(.tail)
@@ -181,29 +412,11 @@ public struct GuidedLabelScanView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
     
-    // MARK: - Bottom Controls
-    
-    private var bottomControls: some View {
+    // MARK: - Review Controls (Post-Capture)
+
+    private var reviewControls: some View {
         VStack(spacing: 16) {
-            if capturedImage == nil {
-                // Capture button
-                Button {
-                    captureAndScan()
-                } label: {
-                    ZStack {
-                        Circle()
-                            .fill(Color.white)
-                            .frame(width: 72, height: 72)
-                        
-                        Circle()
-                            .stroke(Color.white, lineWidth: 4)
-                            .frame(width: 84, height: 84)
-                    }
-                }
-                .disabled(isProcessing || !camera.isAuthorized)
-                .opacity(isProcessing ? 0.5 : 1)
-            } else {
-                // Post-capture buttons
+            if capturedImage != nil && !isProcessing {
                 Button {
                     submitResult()
                 } label: {
@@ -215,61 +428,30 @@ public struct GuidedLabelScanView: View {
                         .background(Capsule().fill(Color.blue))
                 }
                 .padding(.horizontal, 24)
-                
+
                 Button("Retake") {
                     resetCapture()
                 }
                 .font(.subheadline)
                 .foregroundStyle(.white.opacity(0.8))
             }
-            
-            // Skip option
-            if #available(iOS 26.0, *) {
-                Button {
-                    onSkip()
-                } label: {
-                    Text("No Label on This Item")
-                        .font(.body)
-                        .fontWeight(.medium)
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 24)
-                        .padding(.vertical, 10)
-                }
-                .glassEffect(.regular.interactive(), in: .capsule)
-            } else {
-                Button {
-                    onSkip()
-                } label: {
-                    Text("No Label on This Item")
-                        .font(.body)
-                        .fontWeight(.medium)
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 24)
-                        .padding(.vertical, 10)
-                        .background(Capsule().fill(Color.white.opacity(0.2)))
-                }
+
+            Button {
+                onSkip()
+            } label: {
+                Text("No Label on This Item")
+                    .font(.body)
+                    .fontWeight(.medium)
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 24)
+                    .padding(.vertical, 10)
+                    .background(Capsule().fill(Color.white.opacity(0.2)))
             }
         }
     }
     
     // MARK: - Actions
-    
-    private func captureAndScan() {
-        isProcessing = true
-        errorMessage = nil
-        
-        camera.capturePhoto { image in
-            guard let image else {
-                isProcessing = false
-                errorMessage = "Failed to capture photo"
-                return
-            }
-            
-            capturedImage = image
-            performOCR(on: image)
-        }
-    }
-    
+
     private func performOCR(on image: UIImage) {
         guard let cgImage = image.cgImage else {
             isProcessing = false
@@ -368,7 +550,7 @@ public struct GuidedLabelScanView: View {
                     .trimmingCharacters(in: CharacterSet(charactersIn: ":.-# "))
                     .trimmingCharacters(in: .whitespaces)
 
-                if cleaned.count >= 3 && cleaned.count <= 50 {
+                if cleaned.count >= 3 && cleaned.count <= 50 && looksLikeIdentifier(cleaned) {
                     if pending == "model" && detectedModel.isEmpty {
                         detectedModel = cleaned
                         claimedLines.insert(i)
@@ -379,7 +561,7 @@ public struct GuidedLabelScanView: View {
                         ocrLog.info("  ✅ SERIAL from pending hint (next line[\(i)]): \"\(cleaned)\"")
                     }
                 } else {
-                    ocrLog.info("  ⏭️ Pending \(pending) — next line too short/long (\(cleaned.count) chars), skipping")
+                    ocrLog.info("  ⏭️ Pending \(pending) — next line \"\(cleaned)\" rejected (len \(cleaned.count), hasDigit: \(looksLikeIdentifier(cleaned)))")
                 }
                 pendingField = nil
             }
@@ -455,6 +637,15 @@ public struct GuidedLabelScanView: View {
         ocrLog.info("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
     }
 
+    // MARK: - Identifier Validation
+
+    /// Model/serial numbers nearly always contain at least one digit.
+    /// Rejects plain English words like "version", "type", "number" that OCR
+    /// picks up near hint labels.
+    private func looksLikeIdentifier(_ text: String) -> Bool {
+        text.contains(where: \.isNumber)
+    }
+
     // MARK: - Hint Extraction
 
     private enum HintResult {
@@ -471,9 +662,12 @@ public struct GuidedLabelScanView: View {
                         .trimmingCharacters(in: CharacterSet(charactersIn: ":.-# "))
                         .trimmingCharacters(in: .whitespaces)
 
-                    if cleaned.count >= 3 && cleaned.count <= 50 {
+                    if cleaned.count >= 3 && cleaned.count <= 50 && looksLikeIdentifier(cleaned) {
                         ocrLog.info("    🏷️ hint \"\(hint)\" → value: \"\(cleaned)\" ✅")
                         return .value(cleaned)
+                    } else if cleaned.count >= 3 && !looksLikeIdentifier(cleaned) {
+                        ocrLog.info("    🏷️ hint \"\(hint)\" → \"\(cleaned)\" rejected (no digits) — checking next line")
+                        return .hintOnly
                     } else {
                         ocrLog.info("    🏷️ hint \"\(hint)\" → afterHint: \"\(cleaned)\" (len \(cleaned.count)) — hint only")
                         return .hintOnly
