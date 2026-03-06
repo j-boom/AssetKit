@@ -21,7 +21,7 @@ public enum AssetCaptureContext {
 // MARK: - Capture Result
 
 public enum AssetCaptureResult {
-    case completed(asset: Asset, trainingData: TrainingSample?)
+    case completed(asset: Asset, trainingData: TrainingSample?, capturedImage: UIImage?)
     case cancelled
 }
 
@@ -56,7 +56,7 @@ public final class AssetCaptureCoordinator: ObservableObject {
         self.onComplete = onComplete
     }
     
-    public func complete(with asset: Asset, trainingData: TrainingSample? = nil) {
+    public func complete(with asset: Asset, trainingData: TrainingSample? = nil, capturedImage: UIImage? = nil) {
         print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
         print("✅ AssetKit: Asset capture completed")
         print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
@@ -81,7 +81,7 @@ public final class AssetCaptureCoordinator: ObservableObject {
         }
         print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
         
-        onComplete?(.completed(asset: asset, trainingData: trainingData))
+        onComplete?(.completed(asset: asset, trainingData: trainingData, capturedImage: capturedImage))
     }
     
     public func cancel() {

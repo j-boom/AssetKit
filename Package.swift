@@ -8,12 +8,13 @@ let package = Package(
         .library(name: "AssetKit", targets: ["AssetKit"])
     ],
     dependencies: [
-        .package(path: "../CastleMindr/CastleMindrModels")
+        .package(path: "../CastleMindr/CastleMindrModels"),
+        .package(path: "../CMCameraKit")
     ],
     targets: [
         .target(
             name: "AssetKit",
-            dependencies: ["CastleMindrModels"]
+            dependencies: ["CastleMindrModels", "CMCameraKit"]
         )
     ]
 )

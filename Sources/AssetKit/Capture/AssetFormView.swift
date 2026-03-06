@@ -11,7 +11,7 @@ import CastleMindrModels
 public struct AssetFormView: View {
     let initialData: AssetFormData
     let context: AssetCaptureContext
-    let onSave: (Asset, TrainingSample?) -> Void
+    let onSave: (Asset, TrainingSample?, UIImage?) -> Void
     let onCancel: () -> Void
     
     @EnvironmentObject private var knowledgeBase: ApplianceKnowledgeBase
@@ -34,7 +34,7 @@ public struct AssetFormView: View {
     public init(
         initialData: AssetFormData,
         context: AssetCaptureContext,
-        onSave: @escaping (Asset, TrainingSample?) -> Void,
+        onSave: @escaping (Asset, TrainingSample?, UIImage?) -> Void,
         onCancel: @escaping () -> Void
     ) {
         self.initialData = initialData
@@ -304,7 +304,14 @@ public struct AssetFormView: View {
             }
         }
         
-        onSave(asset, trainingSample)
+        // Crop to bounding box for the stored asset photo (not full scene)
+        var assetImage = initialData.applianceImage
+        if let fullImage = initialData.applianceImage,
+           let boundingBox = initialData.originalRecognition?.boundingBox {
+            assetImage = fullImage.cropped(to: boundingBox) ?? fullImage
+        }
+
+        onSave(asset, trainingSample, assetImage)
     }
 }
 

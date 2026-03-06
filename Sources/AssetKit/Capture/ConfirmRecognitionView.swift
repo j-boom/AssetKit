@@ -19,6 +19,7 @@ public struct ConfirmRecognitionView: View {
     @State private var selectedBrand: String
     @State private var showCategoryPicker = false
     @State private var showBrandPicker = false
+    @State private var categorySearchText = ""
     
     public init(
         result: RecognitionResult,
@@ -40,14 +41,10 @@ public struct ConfirmRecognitionView: View {
     }
 
     private var categoryDisplayName: String {
-        // First check knowledge base for known display name
         if let knowledge = knowledgeBase.knowledge(for: selectedCategory) {
             return knowledge.displayName
         }
-        // Otherwise format the raw value nicely: "patio_chair" -> "Patio Chair"
-        return selectedCategory.rawValue
-            .replacingOccurrences(of: "_", with: " ")
-            .capitalized
+        return selectedCategory.displayName
     }
     
     public var body: some View {
@@ -155,7 +152,8 @@ public struct ConfirmRecognitionView: View {
         .sheet(isPresented: $showCategoryPicker) {
             CategoryPickerSheet(
                 selectedCategory: $selectedCategory,
-                categories: knowledgeBase.allCategories()
+                searchText: $categorySearchText,
+                geminiCategory: result.category != .unknown ? result.category : nil
             )
         }
         .sheet(isPresented: $showBrandPicker) {
@@ -171,27 +169,39 @@ public struct ConfirmRecognitionView: View {
 
 private struct CategoryPickerSheet: View {
     @Binding var selectedCategory: ApplianceCategory
-    let categories: [CategoryKnowledge]
+    @Binding var searchText: String
+    /// Category returned by Gemini (shown at top if not already in allPredefined)
+    let geminiCategory: ApplianceCategory?
     @Environment(\.dismiss) private var dismiss
-    
+
+    private var filteredCategories: [ApplianceCategory] {
+        let all = ApplianceCategory.allPredefined
+        if searchText.isEmpty { return all }
+        let query = searchText.lowercased()
+        return all.filter { $0.displayName.lowercased().contains(query) }
+    }
+
+    /// True when Gemini returned a category not in the predefined list
+    private var showGeminiSuggestion: Bool {
+        guard let cat = geminiCategory, cat != .unknown, cat != .other else { return false }
+        return !ApplianceCategory.allPredefined.contains(cat)
+    }
+
     var body: some View {
         NavigationStack {
-            List(categories, id: \.id) { (cat: CategoryKnowledge) in
-                Button {
-                    selectedCategory = cat.category
-                    dismiss()
-                } label: {
-                    HStack {
-                        Text(cat.displayName)
-                            .foregroundStyle(.primary)
-                        Spacer()
-                        if cat.category == selectedCategory {
-                            Image(systemName: "checkmark")
-                                .foregroundStyle(Color.accentColor)
-                        }
+            List {
+                if showGeminiSuggestion, let cat = geminiCategory {
+                    Section("AI Suggestion") {
+                        categoryRow(cat)
+                    }
+                }
+                Section {
+                    ForEach(filteredCategories, id: \.rawValue) { cat in
+                        categoryRow(cat)
                     }
                 }
             }
+            .searchable(text: $searchText, prompt: "Search types...")
             .navigationTitle("Select Type")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -200,7 +210,24 @@ private struct CategoryPickerSheet: View {
                 }
             }
         }
-        .presentationDetents([.medium])
+        .presentationDetents([.large])
+    }
+
+    private func categoryRow(_ cat: ApplianceCategory) -> some View {
+        Button {
+            selectedCategory = cat
+            dismiss()
+        } label: {
+            HStack {
+                Text(cat.displayName)
+                    .foregroundStyle(.primary)
+                Spacer()
+                if cat == selectedCategory {
+                    Image(systemName: "checkmark")
+                        .foregroundStyle(Color.accentColor)
+                }
+            }
+        }
     }
 }
 

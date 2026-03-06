@@ -20,8 +20,8 @@ public final class GeminiUsageTracker {
     private let countKey = "gemini_daily_count"
     private let dateKey = "gemini_daily_date"
 
-    /// Default free-tier daily cap
-    public var dailyCap: Int = 5
+    /// Free-tier daily cap (premium users are unlimited)
+    public var dailyCap: Int = 10
 
     /// When true, cap is ignored entirely. Set via launch argument
     /// `-GEMINI_UNLIMITED YES` in Xcode scheme for dev/testing.
@@ -37,18 +37,18 @@ public final class GeminiUsageTracker {
         self.defaults = UserDefaults(suiteName: suiteName) ?? .standard
     }
 
-    /// Returns true if a Gemini call is allowed (under daily cap).
-    /// Cap applies to all users — Gemini calls cost real money.
-    /// The `isPremium` flag is reserved for future per-tier caps.
+    /// Returns true if a Gemini call is allowed.
+    /// Premium/dev users are unlimited. Free users are capped at `dailyCap` per day.
     public func canUseGemini(isPremium: Bool = false) -> Bool {
-        if unlimitedOverride {
-            usageLog.info("Gemini usage check: UNLIMITED (dev override)")
+        if unlimitedOverride || isPremium {
+            usageLog.info("Gemini usage check: UNLIMITED (\(isPremium ? "premium" : "dev override"))")
             return true
         }
         resetIfNewDay()
         let count = defaults.integer(forKey: countKey)
         let allowed = count < dailyCap
-        usageLog.info("Gemini usage check: \(count)/\(self.dailyCap) — \(allowed ? \"allowed\" : \"capped\")")
+        let status = allowed ? "allowed" : "capped"
+        usageLog.info("Gemini usage check: \(count)/\(self.dailyCap) — \(status)")
         return allowed
     }
 

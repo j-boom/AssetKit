@@ -45,7 +45,7 @@ public struct EntryPointSelectionView: View {
                     subtitle: "Point camera at the item",
                     action: onScanAppliance
                 )
-                
+
                 EntryOptionButton(
                     icon: "doc.text.fill",
                     title: "Scan Receipt",
@@ -53,17 +53,17 @@ public struct EntryPointSelectionView: View {
                     isEnabled: false, // CAS-91
                     action: onScanReceipt
                 )
-                
-                EntryOptionButton(
-                    icon: "pencil",
-                    title: "Enter Manually",
-                    subtitle: "Type in the details",
-                    action: onEnterManually
-                )
             }
             .padding(.horizontal)
-            
+
             Spacer()
+
+            Button(action: onEnterManually) {
+                Text("or enter details manually")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.bottom, 16)
         }
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {

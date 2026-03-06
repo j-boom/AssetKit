@@ -8,6 +8,7 @@
 import SwiftUI
 import AVFoundation
 import os.log
+import CMCameraKit
 
 private let recognitionLog = Logger(subsystem: "com.castlemindr.AssetKit", category: "Recognition")
 
@@ -17,7 +18,6 @@ public struct ObjectRecognitionView: View {
     let onCancel: () -> Void
 
     @Environment(\.isPremium) private var isPremium
-    @StateObject private var camera = CameraController()
     @State private var viewState: ViewState = .camera
     @State private var capturedImage: UIImage?
     @State private var croppedImage: UIImage?
@@ -77,99 +77,20 @@ public struct ObjectRecognitionView: View {
     }
     
     // MARK: - Camera View
-    
+
     private var cameraView: some View {
-        ZStack {
-            CapturableCameraView(controller: camera)
-            
-            // UI overlay
-            VStack {
-                // Top bar
-                HStack {
-                    Button {
-                        onCancel()
-                    } label: {
-                        Image(systemName: "xmark")
-                            .font(.title2)
-                            .foregroundStyle(.white)
-                            .padding(12)
-                            .background(Circle().fill(Color.black.opacity(0.5)))
-                    }
-                    
-                    Spacer()
-                }
-                .padding()
-                
-                Spacer()
-                
-                // Instructions
-                Text("Take a photo of the item")
-                    .font(.headline)
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 20)
-                    .padding(.vertical, 10)
-                    .background(Capsule().fill(Color.black.opacity(0.6)))
-                
-                if let error = errorMessage {
-                    Text(error)
-                        .font(.caption)
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 8)
-                        .background(Capsule().fill(Color.red.opacity(0.8)))
-                        .padding(.top, 8)
-                }
-                
-                Spacer()
-                
-                // Bottom controls
-                VStack(spacing: 20) {
-                    // Capture button
-                    Button {
-                        capturePhoto()
-                    } label: {
-                        ZStack {
-                            Circle()
-                                .fill(Color.white)
-                                .frame(width: 72, height: 72)
-                            
-                            Circle()
-                                .stroke(Color.white, lineWidth: 4)
-                                .frame(width: 84, height: 84)
-                        }
-                    }
-                    .disabled(!camera.isAuthorized)
-                    
-                    // Skip option
-                    if #available(iOS 26.0, *) {
-                        Button {
-                            onSkip()
-                        } label: {
-                            Text("Enter Manually")
-                                .font(.body)
-                                .fontWeight(.medium)
-                                .foregroundStyle(.white)
-                                .padding(.horizontal, 24)
-                                .padding(.vertical, 10)
-                        }
-                        .glassEffect(.regular.interactive(), in: .capsule)
-                    } else {
-                        Button {
-                            onSkip()
-                        } label: {
-                            Text("Enter Manually")
-                                .font(.body)
-                                .fontWeight(.medium)
-                                .foregroundStyle(.white)
-                                .padding(.horizontal, 24)
-                                .padding(.vertical, 10)
-                                .background(Capsule().fill(Color.white.opacity(0.2)))
-                        }
-                    }
-                }
-                .padding(.bottom, 40)
-            }
-        }
+        CMCameraView(
+            configuration: CMCameraConfiguration(
+                instructionMessage: "Take a photo of the item",
+                alternateAction: .init(label: "Enter Manually") { onSkip() }
+            ),
+            errorMessage: $errorMessage,
+            onCapture: { image in
+                capturedImage = image
+                viewState = .selectRegion
+            },
+            onCancel: { onCancel() }
+        )
     }
     
     // MARK: - Processing View
@@ -201,21 +122,7 @@ public struct ObjectRecognitionView: View {
     }
     
     // MARK: - Actions
-    
-    private func capturePhoto() {
-        errorMessage = nil
-        
-        camera.capturePhoto { image in
-            guard let image else {
-                errorMessage = "Failed to capture photo"
-                return
-            }
-            
-            capturedImage = image
-            viewState = .selectRegion
-        }
-    }
-    
+
     private func recognizeItem(_ image: UIImage) {
         // Check daily Gemini cap before calling the API
         guard GeminiUsageTracker.shared.canUseGemini(isPremium: isPremium) else {
