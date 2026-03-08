@@ -62,7 +62,7 @@ public final class AssetCaptureCoordinator: ObservableObject {
         print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
         print("   ID: \(asset.id)")
         print("   Name: \(asset.name)")
-        print("   Type: \(asset.type.rawValue)")
+        print("   Type: \(asset.type)")
         print("   Brand: \(asset.brand ?? "nil")")
         print("   Manufacturer: \(asset.manufacturer ?? "nil")")
         print("   Model: \(asset.modelNumber ?? "nil")")

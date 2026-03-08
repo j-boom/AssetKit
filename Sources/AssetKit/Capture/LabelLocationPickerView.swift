@@ -12,7 +12,7 @@ import CastleMindrModels
 
 /// Quick picker for label location - shown after successful OCR scan
 public struct LabelLocationPickerView: View {
-    let category: ApplianceCategory
+    let category: String
     let onSelect: (LabelLocation, String?) -> Void   // (location, customDescription)
     let onSkip: () -> Void
 
@@ -22,7 +22,7 @@ public struct LabelLocationPickerView: View {
     @FocusState private var isCustomFieldFocused: Bool
 
     public init(
-        category: ApplianceCategory,
+        category: String,
         onSelect: @escaping (LabelLocation, String?) -> Void,
         onSkip: @escaping () -> Void
     ) {
@@ -226,7 +226,7 @@ private struct LocationButton: View {
 
 #Preview {
     LabelLocationPickerView(
-        category: .refrigerator,
+        category: "refrigerator",
         onSelect: { location, description in
             print("Selected: \(location), description: \(description ?? "nil")")
         },

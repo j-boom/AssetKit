@@ -26,7 +26,7 @@ public enum AssetCaptureFlowState {
 
 public struct AssetFormData {
     public var name: String
-    public var category: ApplianceCategory
+    public var category: String
     public var brand: String
     public var manufacturer: String
     public var modelNumber: String
@@ -43,7 +43,7 @@ public struct AssetFormData {
 
     public init(
         name: String = "",
-        category: ApplianceCategory = .unknown,
+        category: String = "unknown",
         brand: String = "",
         manufacturer: String = "",
         modelNumber: String = "",
@@ -282,13 +282,13 @@ extension AssetCaptureFlowState: Hashable {
             hasher.combine(1)
         case .confirmRecognition(let result):
             hasher.combine(2)
-            hasher.combine(result.category.rawValue)
+            hasher.combine(result.category)
         case .guidedLabelScan(let result):
             hasher.combine(3)
-            hasher.combine(result.category.rawValue)
+            hasher.combine(result.category)
         case .labelLocationPicker(let result, _):
             hasher.combine(4)
-            hasher.combine(result.category.rawValue)
+            hasher.combine(result.category)
         case .form(let data):
             hasher.combine(5)
             hasher.combine(data.modelNumber)

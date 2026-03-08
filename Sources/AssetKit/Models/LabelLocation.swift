@@ -85,8 +85,9 @@ public enum LabelLocation: String, CaseIterable, Codable, Sendable, Equatable {
         }
     }
 
-    /// Common locations filtered by appliance category (shown first in picker)
-    public static func commonLocations(for category: ApplianceCategory) -> [LabelLocation] {
+    /// Common locations filtered by appliance category string (shown first in picker)
+    public static func commonLocations(for category: String) -> [LabelLocation] {
+        let category = ApplianceCategory(rawValue: category)
         switch category {
         case .refrigerator:
             return [.insideLeftDoor, .insideRightDoor, .backPanel, .sideLeft, .onCompressor]
@@ -108,7 +109,7 @@ public enum LabelLocation: String, CaseIterable, Codable, Sendable, Equatable {
     }
 
     /// All remaining locations not in the common set for a category
-    public static func additionalLocations(for category: ApplianceCategory) -> [LabelLocation] {
+    public static func additionalLocations(for category: String) -> [LabelLocation] {
         let common = Set(commonLocations(for: category))
         return allCases.filter { $0 != .other && !common.contains($0) }
     }

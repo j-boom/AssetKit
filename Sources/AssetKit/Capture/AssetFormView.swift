@@ -17,7 +17,7 @@ public struct AssetFormView: View {
     @EnvironmentObject private var knowledgeBase: ApplianceKnowledgeBase
     
     @State private var name: String
-    @State private var category: ApplianceCategory
+    @State private var category: String
     @State private var brand: String
     @State private var manufacturer: String
     @State private var modelNumber: String
@@ -54,8 +54,8 @@ public struct AssetFormView: View {
     }
     
     private var categoryDisplayName: String {
-        knowledgeBase.knowledge(for: category)?.displayName
-            ?? category.rawValue.replacingOccurrences(of: "_", with: " ").capitalized
+        knowledgeBase.knowledge(forCategory: category)?.displayName
+            ?? category.replacingOccurrences(of: "_", with: " ").capitalized
     }
     
     private var generatedName: String {
@@ -65,7 +65,7 @@ public struct AssetFormView: View {
     }
     
     private var canSave: Bool {
-        category != .unknown && !isSaving
+        category != "unknown" && !isSaving
     }
     
     public var body: some View {
@@ -88,8 +88,8 @@ public struct AssetFormView: View {
                         Text("Type")
                             .foregroundStyle(.primary)
                         Spacer()
-                        Text(category == .unknown ? "Select" : categoryDisplayName)
-                            .foregroundStyle(category == .unknown ? .secondary : .primary)
+                        Text(category == "unknown" ? "Select" : categoryDisplayName)
+                            .foregroundStyle(category == "unknown" ? .secondary : .primary)
                         Image(systemName: "chevron.right")
                             .font(.caption)
                             .foregroundStyle(.tertiary)
@@ -334,22 +334,22 @@ private struct ScannedIndicator: View {
 // MARK: - Category Picker
 
 private struct FormCategoryPicker: View {
-    @Binding var selectedCategory: ApplianceCategory
+    @Binding var selectedCategory: String
     let categories: [CategoryKnowledge]
     @Environment(\.dismiss) private var dismiss
-    
+
     var body: some View {
         NavigationStack {
             List(categories, id: \.id) { (cat: CategoryKnowledge) in
                 Button {
-                    selectedCategory = cat.category
+                    selectedCategory = cat.category.rawValue
                     dismiss()
                 } label: {
                     HStack {
                         Text(cat.displayName)
                             .foregroundStyle(.primary)
                         Spacer()
-                        if cat.category == selectedCategory {
+                        if cat.category.rawValue == selectedCategory {
                             Image(systemName: "checkmark")
                                 .foregroundStyle(Color.accentColor)
                         }

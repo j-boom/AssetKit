@@ -11,7 +11,7 @@ import CastleMindrModels
 
 /// Result from appliance recognition (API or on-device)
 public struct RecognitionResult: Equatable {
-    public let category: ApplianceCategory
+    public let category: String
     public let brand: String?
     public let manufacturer: String?
     public let confidence: Double
@@ -25,7 +25,7 @@ public struct RecognitionResult: Equatable {
     public let error: String?
 
     public init(
-        category: ApplianceCategory,
+        category: String,
         brand: String? = nil,
         manufacturer: String? = nil,
         confidence: Double,
@@ -44,7 +44,12 @@ public struct RecognitionResult: Equatable {
 
     /// Whether this is a successful recognition (not unknown, no error, confidence > 0.5)
     public var isSuccessful: Bool {
-        category != .unknown && error == nil && confidence > 0.5
+        category != "unknown" && error == nil && confidence > 0.5
+    }
+
+    /// Backward-compatible lookup for category icon, display name, etc.
+    public var categoryInfo: ApplianceCategory {
+        ApplianceCategory(rawValue: category)
     }
 
     // Equatable - ignore images for comparison
@@ -66,10 +71,10 @@ struct RecognitionAPIResponse: Codable {
     let manufacturer: String?
     let confidence: Double
     let error: String?
-    
+
     func toResult(with image: UIImage?) -> RecognitionResult {
         RecognitionResult(
-            category: ApplianceCategory(rawValue: category),
+            category: category,
             brand: manufacturer,  // API returns brand name in "manufacturer" field
             confidence: confidence,
             capturedImage: image,

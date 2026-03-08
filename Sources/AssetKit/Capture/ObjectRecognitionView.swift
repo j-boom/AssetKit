@@ -130,7 +130,7 @@ public struct ObjectRecognitionView: View {
             // Pass through with the captured image but no AI prediction.
             // ConfirmRecognitionView's category picker lets the user choose.
             let manual = RecognitionResult(
-                category: .unknown,
+                category: "unknown",
                 brand: nil,
                 confidence: 0,
                 capturedImage: capturedImage,

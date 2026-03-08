@@ -13,14 +13,14 @@ public struct ConfirmRecognitionView: View {
     let onConfirm: (RecognitionResult) -> Void
     let onRetry: () -> Void
     let onSkipToForm: () -> Void
-    
+
     @EnvironmentObject private var knowledgeBase: ApplianceKnowledgeBase
-    @State private var selectedCategory: ApplianceCategory
+    @State private var selectedCategory: String
     @State private var selectedBrand: String
     @State private var showCategoryPicker = false
     @State private var showBrandPicker = false
     @State private var categorySearchText = ""
-    
+
     public init(
         result: RecognitionResult,
         onConfirm: @escaping (RecognitionResult) -> Void,
@@ -34,23 +34,23 @@ public struct ConfirmRecognitionView: View {
         self._selectedCategory = State(initialValue: result.category)
         self._selectedBrand = State(initialValue: result.brand ?? "")
     }
-    
+
     /// True when AI recognition was skipped (e.g. daily cap reached)
     private var isManualSelection: Bool {
-        result.confidence == 0 && result.category == .unknown
+        result.confidence == 0 && result.category == "unknown"
     }
 
     private var categoryDisplayName: String {
-        if let knowledge = knowledgeBase.knowledge(for: selectedCategory) {
+        if let knowledge = knowledgeBase.knowledge(forCategory: selectedCategory) {
             return knowledge.displayName
         }
-        return selectedCategory.displayName
+        return ApplianceCategory(rawValue: selectedCategory).displayName
     }
-    
+
     public var body: some View {
         VStack(spacing: 24) {
             Spacer()
-            
+
             // Captured image or placeholder
             Group {
                 if let image = result.capturedImage {
@@ -71,7 +71,7 @@ public struct ConfirmRecognitionView: View {
             .frame(maxHeight: 200)
             .clipShape(RoundedRectangle(cornerRadius: 12))
             .padding(.horizontal)
-            
+
             Text(isManualSelection ? "What is this item?" : "This looks like a:")
                 .font(.headline)
 
@@ -112,9 +112,9 @@ public struct ConfirmRecognitionView: View {
                         .foregroundStyle(.tertiary)
                 }
             }
-            
+
             Spacer()
-            
+
             // Actions
             VStack(spacing: 12) {
                 Button {
@@ -133,7 +133,7 @@ public struct ConfirmRecognitionView: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.large)
-                .disabled(isManualSelection && selectedCategory == .unknown)
+                .disabled(isManualSelection && selectedCategory == "unknown")
 
                 HStack(spacing: 24) {
                     if !isManualSelection {
@@ -144,7 +144,7 @@ public struct ConfirmRecognitionView: View {
                 .foregroundStyle(.secondary)
             }
             .padding(.horizontal)
-            
+
             Spacer().frame(height: 20)
         }
         .navigationTitle("Confirm")
@@ -153,7 +153,7 @@ public struct ConfirmRecognitionView: View {
             CategoryPickerSheet(
                 selectedCategory: $selectedCategory,
                 searchText: $categorySearchText,
-                geminiCategory: result.category != .unknown ? result.category : nil
+                geminiCategory: result.category != "unknown" ? result.category : nil
             )
         }
         .sheet(isPresented: $showBrandPicker) {
@@ -168,10 +168,10 @@ public struct ConfirmRecognitionView: View {
 // MARK: - Category Picker
 
 private struct CategoryPickerSheet: View {
-    @Binding var selectedCategory: ApplianceCategory
+    @Binding var selectedCategory: String
     @Binding var searchText: String
-    /// Category returned by Gemini (shown at top if not already in allPredefined)
-    let geminiCategory: ApplianceCategory?
+    /// Category string returned by Gemini (shown at top if not already in allPredefined)
+    let geminiCategory: String?
     @Environment(\.dismiss) private var dismiss
 
     private var filteredCategories: [ApplianceCategory] {
@@ -183,8 +183,9 @@ private struct CategoryPickerSheet: View {
 
     /// True when Gemini returned a category not in the predefined list
     private var showGeminiSuggestion: Bool {
-        guard let cat = geminiCategory, cat != .unknown, cat != .other else { return false }
-        return !ApplianceCategory.allPredefined.contains(cat)
+        guard let cat = geminiCategory, cat != "unknown", cat != "other" else { return false }
+        let asCat = ApplianceCategory(rawValue: cat)
+        return !ApplianceCategory.allPredefined.contains(asCat)
     }
 
     var body: some View {
@@ -192,7 +193,7 @@ private struct CategoryPickerSheet: View {
             List {
                 if showGeminiSuggestion, let cat = geminiCategory {
                     Section("AI Suggestion") {
-                        categoryRow(cat)
+                        categoryRow(ApplianceCategory(rawValue: cat))
                     }
                 }
                 Section {
@@ -215,14 +216,14 @@ private struct CategoryPickerSheet: View {
 
     private func categoryRow(_ cat: ApplianceCategory) -> some View {
         Button {
-            selectedCategory = cat
+            selectedCategory = cat.rawValue
             dismiss()
         } label: {
             HStack {
                 Text(cat.displayName)
                     .foregroundStyle(.primary)
                 Spacer()
-                if cat == selectedCategory {
+                if cat.rawValue == selectedCategory {
                     Image(systemName: "checkmark")
                         .foregroundStyle(Color.accentColor)
                 }
@@ -235,13 +236,13 @@ private struct CategoryPickerSheet: View {
 
 private struct BrandPickerSheet: View {
     @Binding var selectedBrand: String
-    let category: ApplianceCategory
+    let category: String
     @EnvironmentObject private var knowledgeBase: ApplianceKnowledgeBase
     @Environment(\.dismiss) private var dismiss
     @State private var customBrand = ""
 
     private var brands: [String] {
-        knowledgeBase.knowledge(for: category)?.commonManufacturers ?? []
+        knowledgeBase.knowledge(forCategory: category)?.commonManufacturers ?? []
     }
 
     var body: some View {

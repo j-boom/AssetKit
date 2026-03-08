@@ -52,7 +52,7 @@ public actor LabelExtractionService {
     public func extractFields(
         image: UIImage,
         ocrText: String?,
-        category: ApplianceCategory,
+        category: String,
         brand: String?
     ) async throws -> LabelExtractionResult {
         // 1. Prepare image
@@ -65,7 +65,7 @@ public actor LabelExtractionService {
         // 2. Build request body
         var body: [String: Any] = [
             "image_base64": base64String,
-            "appliance_category": category.rawValue
+            "appliance_category": category
         ]
 
         if let ocrText, !ocrText.isEmpty {

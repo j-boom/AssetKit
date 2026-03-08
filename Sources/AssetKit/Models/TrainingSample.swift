@@ -247,7 +247,7 @@ extension TrainingSample {
     /// Build training sample from capture flow data
     public static func build(
         recognition: RecognitionResult,
-        confirmedCategory: ApplianceCategory,
+        confirmedCategory: String,
         confirmedBrand: String?,
         confirmedManufacturer: String?,
         labelScan: LabelScanResult?,
@@ -273,10 +273,10 @@ extension TrainingSample {
             && ocrManufacturer != userFinalManufacturer
 
         return TrainingSample(
-            category: confirmedCategory.rawValue,
+            category: confirmedCategory,
             brand: confirmedBrand,
             manufacturer: confirmedManufacturer,
-            aiPredictedCategory: recognition.category.rawValue,
+            aiPredictedCategory: recognition.category,
             aiPredictedBrand: recognition.brand,
             aiPredictedManufacturer: recognition.manufacturer,
             aiConfidence: recognition.confidence,

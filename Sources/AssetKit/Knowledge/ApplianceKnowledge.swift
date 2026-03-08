@@ -80,6 +80,10 @@ public struct ManufacturerKnowledge: Codable, Identifiable, Sendable {
     public func override(for category: ApplianceCategory) -> ManufacturerCategoryOverride? {
         categories[category.rawValue]
     }
+
+    public func override(for category: String) -> ManufacturerCategoryOverride? {
+        categories[category]
+    }
 }
 
 public struct ManufacturerCategoryOverride: Codable, Sendable {
@@ -142,7 +146,12 @@ public final class ApplianceKnowledgeBase: ObservableObject {
     public func knowledge(for category: ApplianceCategory) -> CategoryKnowledge? {
         categories[category]
     }
-    
+
+    /// Look up category knowledge by raw string (e.g. "refrigerator").
+    public func knowledge(forCategory categoryString: String) -> CategoryKnowledge? {
+        categories[ApplianceCategory(rawValue: categoryString)]
+    }
+
     public func knowledge(for manufacturerName: String) -> ManufacturerKnowledge? {
         manufacturers[manufacturerName.lowercased()]
     }
@@ -159,17 +168,27 @@ public final class ApplianceKnowledgeBase: ObservableObject {
            let locations = override.labelLocations {
             return locations
         }
-        
+
         // Fall back to category default
         return knowledge(for: category)?.labelLocations ?? []
     }
-    
+
+    /// String-based overload for category lookups.
+    public func labelLocationHints(for category: String, manufacturer: String? = nil) -> [LabelLocationHint] {
+        labelLocationHints(for: ApplianceCategory(rawValue: category), manufacturer: manufacturer)
+    }
+
     public func guidancePrompt(for category: ApplianceCategory, manufacturer: String? = nil) -> String {
         let hints = labelLocationHints(for: category, manufacturer: manufacturer)
         guard let topHint = hints.first else {
             return "Look for a label with model and serial number information."
         }
         return topHint.instructions
+    }
+
+    /// String-based overload for guidance prompts.
+    public func guidancePrompt(for category: String, manufacturer: String? = nil) -> String {
+        guidancePrompt(for: ApplianceCategory(rawValue: category), manufacturer: manufacturer)
     }
 }
 

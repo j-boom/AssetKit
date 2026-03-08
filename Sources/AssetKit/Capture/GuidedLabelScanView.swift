@@ -521,13 +521,13 @@ public struct GuidedLabelScanView: View {
     }
     
     private func parseFields(from lines: [String]) {
-        let knowledge = knowledgeBase.knowledge(for: recognition.category)
+        let knowledge = knowledgeBase.knowledge(forCategory: recognition.category)
         let patterns = knowledge?.fieldPatterns ?? []
 
         let modelHints = ["MODEL:", "MODEL ", "MOD:", "MOD ", "M/N:", "M/N ", "MODEL NO", "MODEL NUMBER"]
         let serialHints = ["SERIAL:", "SERIAL ", "SER:", "SER ", "S/N:", "S/N ", "SERIAL NO", "SERIAL NUMBER"]
 
-        ocrLog.info("🔍 PARSING — category: \(self.recognition.category.rawValue), \(patterns.count) pattern(s) loaded")
+        ocrLog.info("🔍 PARSING — category: \(self.recognition.category), \(patterns.count) pattern(s) loaded")
 
         // Track which lines have been claimed by hint-based extraction
         var claimedLines: Set<Int> = []
