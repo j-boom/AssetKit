@@ -255,6 +255,7 @@ public struct AssetFormView: View {
             name: generatedName,
             propertyId: propertyId,
             type: category,
+            system: AssetSystem.defaultSystem(for: category),
             areaId: areaId,
             brand: brand.isEmpty ? nil : brand,
             manufacturer: manufacturer.isEmpty ? nil : manufacturer,
