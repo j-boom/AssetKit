@@ -1,0 +1,4744 @@
+=== DIRECTORY STRUCTURE ===
+.claude/settings.local.json
+Docs/ON_DEVICE_ML_ROADMAP.md
+Package.swift
+README.md
+Sources/AssetKit/Capture/AssetCaptureCoordinator.swift
+Sources/AssetKit/Capture/AssetCaptureView.swift
+Sources/AssetKit/Capture/AssetFormView.swift
+Sources/AssetKit/Capture/BoundingBoxSelector.swift
+Sources/AssetKit/Capture/CameraView.swift
+Sources/AssetKit/Capture/ConfirmRecognitionView.swift
+Sources/AssetKit/Capture/EntryPointSelectionView.swift
+Sources/AssetKit/Capture/GuidedLabelScanView.swift
+Sources/AssetKit/Capture/LabelLocationPickerView.swift
+Sources/AssetKit/Capture/ObjectRecognitionView.swift
+Sources/AssetKit/Knowledge/ApplianceKnowledge.swift
+Sources/AssetKit/Knowledge/BundledKnowledgeProvider.swift
+Sources/AssetKit/Models/LabelLocation.swift
+Sources/AssetKit/Models/LabelScanResult.swift
+Sources/AssetKit/Models/RecognitionResult.swift
+Sources/AssetKit/Models/TrainingSample.swift
+Sources/AssetKit/Services/LabelExtractionService.swift
+Sources/AssetKit/Services/RecognitionAPIService.swift
+Sources/AssetKit/Services/TrainingSampleService.swift
+Tests/AssetKitTests/AssetKitTests.swift
+
+
+=== FILE CONTENTS ===
+
+// ===== Tests/AssetKitTests/AssetKitTests.swift =====
+import Testing
+@testable import AssetKit
+
+@Test func example() async throws {
+    // Write your test here and use APIs like `#expect(...)` to check expected conditions.
+}
+
+
+// ===== .claude/settings.local.json =====
+{
+  "permissions": {
+    "allow": [
+      "Bash(find:*)",
+      "Bash(swift build:*)",
+      "Bash(xcodebuild:*)",
+      "Bash(sudo xcode-select:*)",
+      "Bash(echo:*)",
+      "Bash(chmod:*)",
+      "Bash(ls:*)",
+      "Bash(xcode-select:*)",
+      "Bash(DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer /Applications/Xcode.app/Contents/Developer/usr/bin/xcodebuild:*)"
+    ]
+  }
+}
+
+
+// ===== Package.swift =====
+// swift-tools-version: 5.9
+import PackageDescription
+
+let package = Package(
+    name: "AssetKit",
+    platforms: [.iOS(.v17)],
+    products: [
+        .library(name: "AssetKit", targets: ["AssetKit"])
+    ],
+    dependencies: [
+        .package(path: "../CastleMindr/CastleMindrModels")
+    ],
+    targets: [
+        .target(
+            name: "AssetKit",
+            dependencies: ["CastleMindrModels"]
+        )
+    ]
+)
+
+
+// ===== Sources/AssetKit/Capture/LabelLocationPickerView.swift =====
+//
+//  LabelLocationPickerView.swift
+//  AssetKit
+//
+//  Created by Jim Bergren on 1/24/26.
+//
+
+
+import SwiftUI
+import CastleMindrModels
+
+
+/// Quick picker for label location - shown after successful OCR scan
+public struct LabelLocationPickerView: View {
+    let category: ApplianceCategory
+    let onSelect: (LabelLocation, String?) -> Void   // (location, customDescription)
+    let onSkip: () -> Void
+
+    @State private var selectedLocation: LabelLocation?
+    @State private var showAllLocations = false
+    @State private var customDescription = ""
+    @FocusState private var isCustomFieldFocused: Bool
+
+    public init(
+        category: ApplianceCategory,
+        onSelect: @escaping (LabelLocation, String?) -> Void,
+        onSkip: @escaping () -> Void
+    ) {
+        self.category = category
+        self.onSelect = onSelect
+        self.onSkip = onSkip
+    }
+
+    private var commonLocations: [LabelLocation] {
+        LabelLocation.commonLocations(for: category)
+    }
+
+    private var additionalLocations: [LabelLocation] {
+        LabelLocation.additionalLocations(for: category)
+    }
+
+    public var body: some View {
+        ScrollView {
+            VStack(spacing: 24) {
+                // Header
+                VStack(spacing: 8) {
+                    Image(systemName: "mappin.circle.fill")
+                        .font(.system(size: 48))
+                        .foregroundStyle(.blue)
+
+                    Text("Where was the label?")
+                        .font(.title2.bold())
+
+                    Text("This helps us guide future users")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.top)
+
+                // Common locations grid
+                LazyVGrid(columns: [
+                    GridItem(.flexible()),
+                    GridItem(.flexible())
+                ], spacing: 12) {
+                    ForEach(commonLocations, id: \.self) { location in
+                        LocationButton(
+                            location: location,
+                            isSelected: selectedLocation == location
+                        ) {
+                            withAnimation(.easeInOut(duration: 0.2)) {
+                                selectedLocation = location
+                                isCustomFieldFocused = false
+                            }
+                        }
+                    }
+                }
+                .padding(.horizontal)
+
+                // Show More / Additional Locations
+                if !additionalLocations.isEmpty {
+                    if showAllLocations {
+                        VStack(spacing: 8) {
+                            HStack {
+                                Rectangle()
+                                    .frame(height: 1)
+                                    .foregroundStyle(.quaternary)
+                                Text("More locations")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                Rectangle()
+                                    .frame(height: 1)
+                                    .foregroundStyle(.quaternary)
+                            }
+                            .padding(.horizontal)
+
+                            LazyVGrid(columns: [
+                                GridItem(.flexible()),
+                                GridItem(.flexible())
+                            ], spacing: 12) {
+                                ForEach(additionalLocations, id: \.self) { location in
+                                    LocationButton(
+                                        location: location,
+                                        isSelected: selectedLocation == location
+                                    ) {
+                                        withAnimation(.easeInOut(duration: 0.2)) {
+                                            selectedLocation = location
+                                            isCustomFieldFocused = false
+                                        }
+                                    }
+                                }
+                            }
+                            .padding(.horizontal)
+                        }
+                        .transition(.opacity.combined(with: .move(edge: .top)))
+                    } else {
+                        Button {
+                            withAnimation(.easeInOut(duration: 0.3)) {
+                                showAllLocations = true
+                            }
+                        } label: {
+                            HStack(spacing: 4) {
+                                Text("Show more locations")
+                                Image(systemName: "chevron.down")
+                            }
+                            .font(.subheadline)
+                            .foregroundStyle(.blue)
+                        }
+                    }
+                }
+
+                // "Other" with free-text input
+                VStack(spacing: 12) {
+                    LocationButton(
+                        location: .other,
+                        isSelected: selectedLocation == .other
+                    ) {
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            selectedLocation = .other
+                            isCustomFieldFocused = true
+                        }
+                    }
+                    .padding(.horizontal)
+
+                    if selectedLocation == .other {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("Describe where you found the label:")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+
+                            TextField("e.g. behind the kick plate, inside the freezer compartment", text: $customDescription)
+                                .textFieldStyle(.roundedBorder)
+                                .focused($isCustomFieldFocused)
+                                .submitLabel(.done)
+                        }
+                        .padding(.horizontal)
+                        .transition(.opacity.combined(with: .move(edge: .top)))
+                    }
+                }
+
+                Spacer(minLength: 20)
+
+                // Actions
+                VStack(spacing: 12) {
+                    Button {
+                        if let location = selectedLocation {
+                            let description = location == .other ? customDescription.trimmingCharacters(in: .whitespacesAndNewlines) : nil
+                            onSelect(location, description?.isEmpty == true ? nil : description)
+                        }
+                    } label: {
+                        Text("Continue")
+                            .font(.headline)
+                            .frame(maxWidth: .infinity)
+                            .padding()
+                            .background(selectedLocation != nil ? Color.blue : Color.gray.opacity(0.3))
+                            .foregroundStyle(.white)
+                            .clipShape(RoundedRectangle(cornerRadius: 12))
+                    }
+                    .disabled(selectedLocation == nil)
+
+                    Button {
+                        onSkip()
+                    } label: {
+                        Text("Skip")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .padding()
+            }
+        }
+    }
+}
+
+// MARK: - Location Button
+
+private struct LocationButton: View {
+    let location: LabelLocation
+    let isSelected: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            VStack(spacing: 8) {
+                Image(systemName: location.iconName)
+                    .font(.title2)
+
+                Text(location.displayName)
+                    .font(.caption)
+                    .multilineTextAlignment(.center)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 16)
+            .background(isSelected ? Color.blue.opacity(0.15) : Color(.systemGray6))
+            .foregroundStyle(isSelected ? .blue : .primary)
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+            .overlay(
+                RoundedRectangle(cornerRadius: 12)
+                    .stroke(isSelected ? Color.blue : Color.clear, lineWidth: 2)
+            )
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+// MARK: - Preview
+
+#Preview {
+    LabelLocationPickerView(
+        category: .refrigerator,
+        onSelect: { location, description in
+            print("Selected: \(location), description: \(description ?? "nil")")
+        },
+        onSkip: {
+            print("Skipped")
+        }
+    )
+}
+
+
+// ===== Sources/AssetKit/Capture/ConfirmRecognitionView.swift =====
+//
+//  ConfirmRecognitionView.swift
+//  AssetKit
+//
+//  Created by Jim Bergren on 1/23/26.
+//
+
+import SwiftUI
+import CastleMindrModels
+
+public struct ConfirmRecognitionView: View {
+    let result: RecognitionResult
+    let onConfirm: (RecognitionResult) -> Void
+    let onRetry: () -> Void
+    let onSkipToForm: () -> Void
+    
+    @EnvironmentObject private var knowledgeBase: ApplianceKnowledgeBase
+    @State private var selectedCategory: ApplianceCategory
+    @State private var selectedBrand: String
+    @State private var showCategoryPicker = false
+    @State private var showBrandPicker = false
+    
+    public init(
+        result: RecognitionResult,
+        onConfirm: @escaping (RecognitionResult) -> Void,
+        onRetry: @escaping () -> Void,
+        onSkipToForm: @escaping () -> Void
+    ) {
+        self.result = result
+        self.onConfirm = onConfirm
+        self.onRetry = onRetry
+        self.onSkipToForm = onSkipToForm
+        self._selectedCategory = State(initialValue: result.category)
+        self._selectedBrand = State(initialValue: result.brand ?? "")
+    }
+    
+    private var categoryDisplayName: String {
+        // First check knowledge base for known display name
+        if let knowledge = knowledgeBase.knowledge(for: selectedCategory) {
+            return knowledge.displayName
+        }
+        // Otherwise format the raw value nicely: "patio_chair" -> "Patio Chair"
+        return selectedCategory.rawValue
+            .replacingOccurrences(of: "_", with: " ")
+            .capitalized
+    }
+    
+    public var body: some View {
+        VStack(spacing: 24) {
+            Spacer()
+            
+            // Captured image or placeholder
+            Group {
+                if let image = result.capturedImage {
+                    Image(uiImage: image)
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                } else {
+                    RoundedRectangle(cornerRadius: 12)
+                        .fill(Color(.secondarySystemBackground))
+                        .aspectRatio(4/3, contentMode: .fit)
+                        .overlay {
+                            Image(systemName: "photo")
+                                .font(.system(size: 48))
+                                .foregroundStyle(.tertiary)
+                        }
+                }
+            }
+            .frame(maxHeight: 200)
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+            .padding(.horizontal)
+            
+            Text("This looks like a:")
+                .font(.headline)
+            
+            // Category selection
+            VStack(spacing: 12) {
+                Button {
+                    showCategoryPicker = true
+                } label: {
+                    HStack {
+                        Text(categoryDisplayName)
+                            .font(.title2)
+                            .fontWeight(.semibold)
+                        Image(systemName: "chevron.down")
+                            .font(.caption)
+                    }
+                    .foregroundStyle(.primary)
+                }
+                
+                // Brand if detected
+                if !selectedBrand.isEmpty {
+                    Button {
+                        showBrandPicker = true
+                    } label: {
+                        HStack {
+                            Text("by \(selectedBrand)")
+                                .font(.title3)
+                            Image(systemName: "chevron.down")
+                                .font(.caption2)
+                        }
+                        .foregroundStyle(.secondary)
+                    }
+                }
+                
+                // Confidence indicator
+                if result.confidence > 0 {
+                    Text("\(Int(result.confidence * 100))% confident")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                }
+            }
+            
+            Spacer()
+            
+            // Actions
+            VStack(spacing: 12) {
+                Button {
+                    let confirmed = RecognitionResult(
+                        category: selectedCategory,
+                        brand: selectedBrand.isEmpty ? nil : selectedBrand,
+                        manufacturer: result.manufacturer,
+                        confidence: result.confidence,
+                        capturedImage: result.capturedImage,
+                        boundingBox: result.boundingBox
+                    )
+                    onConfirm(confirmed)
+                } label: {
+                    Text("Yes, continue")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+                
+                HStack(spacing: 24) {
+                    Button("Try again", action: onRetry)
+                    Button("Skip to form", action: onSkipToForm)
+                }
+                .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal)
+            
+            Spacer().frame(height: 20)
+        }
+        .navigationTitle("Confirm")
+        .navigationBarTitleDisplayMode(.inline)
+        .sheet(isPresented: $showCategoryPicker) {
+            CategoryPickerSheet(
+                selectedCategory: $selectedCategory,
+                categories: knowledgeBase.allCategories()
+            )
+        }
+        .sheet(isPresented: $showBrandPicker) {
+            BrandPickerSheet(
+                selectedBrand: $selectedBrand,
+                category: selectedCategory
+            )
+        }
+    }
+}
+
+// MARK: - Category Picker
+
+private struct CategoryPickerSheet: View {
+    @Binding var selectedCategory: ApplianceCategory
+    let categories: [CategoryKnowledge]
+    @Environment(\.dismiss) private var dismiss
+    
+    var body: some View {
+        NavigationStack {
+            List(categories, id: \.id) { (cat: CategoryKnowledge) in
+                Button {
+                    selectedCategory = cat.category
+                    dismiss()
+                } label: {
+                    HStack {
+                        Text(cat.displayName)
+                            .foregroundStyle(.primary)
+                        Spacer()
+                        if cat.category == selectedCategory {
+                            Image(systemName: "checkmark")
+                                .foregroundStyle(Color.accentColor)
+                        }
+                    }
+                }
+            }
+            .navigationTitle("Select Type")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+            }
+        }
+        .presentationDetents([.medium])
+    }
+}
+
+// MARK: - Brand Picker
+
+private struct BrandPickerSheet: View {
+    @Binding var selectedBrand: String
+    let category: ApplianceCategory
+    @EnvironmentObject private var knowledgeBase: ApplianceKnowledgeBase
+    @Environment(\.dismiss) private var dismiss
+    @State private var customBrand = ""
+
+    private var brands: [String] {
+        knowledgeBase.knowledge(for: category)?.commonManufacturers ?? []
+    }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    ForEach(brands, id: \.self) { (brand: String) in
+                        Button {
+                            selectedBrand = brand.capitalized
+                            dismiss()
+                        } label: {
+                            HStack {
+                                Text(brand.capitalized)
+                                    .foregroundStyle(.primary)
+                                Spacer()
+                                if brand.lowercased() == selectedBrand.lowercased() {
+                                    Image(systemName: "checkmark")
+                                        .foregroundStyle(Color.accentColor)
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Section("Other") {
+                    HStack {
+                        TextField("Enter brand", text: $customBrand)
+                        Button("Add") {
+                            selectedBrand = customBrand
+                            dismiss()
+                        }
+                        .disabled(customBrand.isEmpty)
+                    }
+                }
+            }
+            .navigationTitle("Select Brand")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+            }
+        }
+        .presentationDetents([.medium])
+    }
+}
+
+
+// ===== Sources/AssetKit/Capture/AssetFormView.swift =====
+//
+//  AssetFormView.swift
+//  AssetKit
+//
+//  Created by Jim Bergren on 1/23/26.
+//
+
+import SwiftUI
+import CastleMindrModels
+
+public struct AssetFormView: View {
+    let initialData: AssetFormData
+    let context: AssetCaptureContext
+    let onSave: (Asset, TrainingSample?) -> Void
+    let onCancel: () -> Void
+    
+    @EnvironmentObject private var knowledgeBase: ApplianceKnowledgeBase
+    
+    @State private var name: String
+    @State private var category: ApplianceCategory
+    @State private var brand: String
+    @State private var manufacturer: String
+    @State private var modelNumber: String
+    @State private var serialNumber: String
+    @State private var purchaseDate: Date?
+    @State private var warrantyExpires: Date?
+    @State private var notes: String
+    @State private var isSaving = false
+    
+    @State private var showPurchaseDatePicker = false
+    @State private var showWarrantyDatePicker = false
+    @State private var showCategoryPicker = false
+    
+    public init(
+        initialData: AssetFormData,
+        context: AssetCaptureContext,
+        onSave: @escaping (Asset, TrainingSample?) -> Void,
+        onCancel: @escaping () -> Void
+    ) {
+        self.initialData = initialData
+        self.context = context
+        self.onSave = onSave
+        self.onCancel = onCancel
+        
+        _name = State(initialValue: initialData.name)
+        _category = State(initialValue: initialData.category)
+        _brand = State(initialValue: initialData.brand)
+        _manufacturer = State(initialValue: initialData.manufacturer)
+        _modelNumber = State(initialValue: initialData.modelNumber)
+        _serialNumber = State(initialValue: initialData.serialNumber)
+        _purchaseDate = State(initialValue: initialData.purchaseDate)
+        _warrantyExpires = State(initialValue: initialData.warrantyExpires)
+        _notes = State(initialValue: initialData.notes)
+    }
+    
+    private var categoryDisplayName: String {
+        knowledgeBase.knowledge(for: category)?.displayName
+            ?? category.rawValue.replacingOccurrences(of: "_", with: " ").capitalized
+    }
+    
+    private var generatedName: String {
+        if !name.isEmpty { return name }
+        let brandPrefix = brand.isEmpty ? "" : "\(brand) "
+        return "\(brandPrefix)\(categoryDisplayName)"
+    }
+    
+    private var canSave: Bool {
+        category != .unknown && !isSaving
+    }
+    
+    public var body: some View {
+        Form {
+            Section {
+                // Name
+                HStack {
+                    Text("Name")
+                    Spacer()
+                    TextField("Auto-generated", text: $name)
+                        .multilineTextAlignment(.trailing)
+                        .foregroundStyle(name.isEmpty ? .secondary : .primary)
+                }
+                
+                // Category
+                Button {
+                    showCategoryPicker = true
+                } label: {
+                    HStack {
+                        Text("Type")
+                            .foregroundStyle(.primary)
+                        Spacer()
+                        Text(category == .unknown ? "Select" : categoryDisplayName)
+                            .foregroundStyle(category == .unknown ? .secondary : .primary)
+                        Image(systemName: "chevron.right")
+                            .font(.caption)
+                            .foregroundStyle(.tertiary)
+                    }
+                }
+                
+                // Brand
+                HStack {
+                    Text("Brand")
+                    Spacer()
+                    TextField("Optional", text: $brand)
+                        .multilineTextAlignment(.trailing)
+                }
+                if !initialData.brand.isEmpty && initialData.brand == brand {
+                    ScannedIndicator()
+                }
+
+                // Manufacturer
+                HStack {
+                    Text("Manufacturer")
+                    Spacer()
+                    TextField("Optional", text: $manufacturer)
+                        .multilineTextAlignment(.trailing)
+                }
+                if !initialData.manufacturer.isEmpty && initialData.manufacturer == manufacturer {
+                    ScannedIndicator()
+                }
+                
+                // Model
+                HStack {
+                    Text("Model")
+                    Spacer()
+                    TextField("Optional", text: $modelNumber)
+                        .multilineTextAlignment(.trailing)
+                }
+                if !initialData.modelNumber.isEmpty && initialData.modelNumber == modelNumber {
+                    ScannedIndicator()
+                }
+                
+                // Serial
+                HStack {
+                    Text("Serial")
+                    Spacer()
+                    TextField("Optional", text: $serialNumber)
+                        .multilineTextAlignment(.trailing)
+                }
+                if !initialData.serialNumber.isEmpty && initialData.serialNumber == serialNumber {
+                    ScannedIndicator()
+                }
+            } header: {
+                Text("Details")
+            }
+            
+            Section {
+                // Purchase date
+                Button {
+                    showPurchaseDatePicker.toggle()
+                } label: {
+                    HStack {
+                        Text("Purchase Date")
+                            .foregroundStyle(.primary)
+                        Spacer()
+                        Text(purchaseDate?.formatted(date: .abbreviated, time: .omitted) ?? "Not set")
+                            .foregroundStyle(purchaseDate == nil ? .secondary : .primary)
+                    }
+                }
+                if showPurchaseDatePicker {
+                    DatePicker(
+                        "Purchase Date",
+                        selection: Binding(
+                            get: { purchaseDate ?? Date() },
+                            set: { purchaseDate = $0 }
+                        ),
+                        displayedComponents: .date
+                    )
+                    .datePickerStyle(.graphical)
+                    
+                    Button("Clear") {
+                        purchaseDate = nil
+                        showPurchaseDatePicker = false
+                    }
+                    .foregroundStyle(.red)
+                }
+                
+                // Warranty expiration
+                Button {
+                    showWarrantyDatePicker.toggle()
+                } label: {
+                    HStack {
+                        Text("Warranty Expires")
+                            .foregroundStyle(.primary)
+                        Spacer()
+                        Text(warrantyExpires?.formatted(date: .abbreviated, time: .omitted) ?? "Not set")
+                            .foregroundStyle(warrantyExpires == nil ? .secondary : .primary)
+                    }
+                }
+                if showWarrantyDatePicker {
+                    DatePicker(
+                        "Warranty Expires",
+                        selection: Binding(
+                            get: { warrantyExpires ?? Date() },
+                            set: { warrantyExpires = $0 }
+                        ),
+                        displayedComponents: .date
+                    )
+                    .datePickerStyle(.graphical)
+                    
+                    Button("Clear") {
+                        warrantyExpires = nil
+                        showWarrantyDatePicker = false
+                    }
+                    .foregroundStyle(.red)
+                }
+            } header: {
+                Text("Optional")
+            }
+            
+            Section {
+                TextField("Notes", text: $notes, axis: .vertical)
+                    .lineLimit(3...6)
+            } header: {
+                Text("Notes")
+            }
+        }
+        .navigationTitle("Asset Details")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .cancellationAction) {
+                Button("Cancel", action: onCancel)
+            }
+            ToolbarItem(placement: .confirmationAction) {
+                Button("Save") {
+                    saveAsset()
+                }
+                .fontWeight(.semibold)
+                .disabled(!canSave)
+            }
+        }
+        .sheet(isPresented: $showCategoryPicker) {
+            FormCategoryPicker(
+                selectedCategory: $category,
+                categories: knowledgeBase.allCategories()
+            )
+        }
+    }
+    
+    private func saveAsset() {
+        isSaving = true
+        
+        let (propertyId, areaId): (String, String?) = {
+            switch context {
+            case .property(let id):
+                return (id, nil)
+            case .room(let propId, let roomId):
+                return (propId, roomId)
+            }
+        }()
+        
+        let asset = Asset(
+            id: UUID().uuidString,
+            name: generatedName,
+            propertyId: propertyId,
+            type: category,
+            areaId: areaId,
+            brand: brand.isEmpty ? nil : brand,
+            manufacturer: manufacturer.isEmpty ? nil : manufacturer,
+            modelNumber: modelNumber.isEmpty ? nil : modelNumber,
+            serialNumber: serialNumber.isEmpty ? nil : serialNumber,
+            purchaseDate: purchaseDate,
+            warrantyExpires: warrantyExpires,
+            notes: notes.isEmpty ? nil : notes
+        )
+
+        // Build training sample if we have recognition data
+        var trainingSample: TrainingSample? = nil
+
+        if let recognition = initialData.originalRecognition {
+            trainingSample = TrainingSample.build(
+                recognition: recognition,
+                confirmedCategory: category,
+                confirmedBrand: brand.isEmpty ? nil : brand,
+                confirmedManufacturer: manufacturer.isEmpty ? nil : manufacturer,
+                labelScan: initialData.labelScan,
+                userFinalModelNumber: modelNumber.isEmpty ? nil : modelNumber,
+                userFinalSerialNumber: serialNumber.isEmpty ? nil : serialNumber,
+                userFinalManufacturer: manufacturer.isEmpty ? nil : manufacturer,
+                userFinalBrand: brand.isEmpty ? nil : brand,
+                labelExtractionSource: initialData.labelScan?.extractionSource
+            )
+            
+            // Crop the image to bounding box for training
+            var trainingImage: UIImage? = recognition.capturedImage
+            if let fullImage = recognition.capturedImage,
+               let boundingBox = recognition.boundingBox {
+                trainingImage = fullImage.cropped(to: boundingBox) ?? fullImage
+            }
+            
+            // Submit training sample to cloud (fire and forget)
+            Task {
+                do {
+                    let result = try await TrainingSampleService.shared.submit(
+                        sample: trainingSample!,
+                        applianceImage: trainingImage,
+                        labelImage: initialData.labelScan?.labelImage
+                    )
+                    print("📊 Training sample submitted: \(result.sampleId)")
+                } catch {
+                    print("⚠️ Failed to submit training sample: \(error.localizedDescription)")
+                }
+            }
+        }
+        
+        onSave(asset, trainingSample)
+    }
+}
+
+// MARK: - Scanned Indicator
+
+private struct ScannedIndicator: View {
+    var body: some View {
+        HStack {
+            Spacer()
+            Label("Scanned", systemImage: "viewfinder")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
+        .listRowInsets(EdgeInsets(top: -8, leading: 0, bottom: 0, trailing: 16))
+        .listRowBackground(Color.clear)
+    }
+}
+
+// MARK: - Category Picker
+
+private struct FormCategoryPicker: View {
+    @Binding var selectedCategory: ApplianceCategory
+    let categories: [CategoryKnowledge]
+    @Environment(\.dismiss) private var dismiss
+    
+    var body: some View {
+        NavigationStack {
+            List(categories, id: \.id) { (cat: CategoryKnowledge) in
+                Button {
+                    selectedCategory = cat.category
+                    dismiss()
+                } label: {
+                    HStack {
+                        Text(cat.displayName)
+                            .foregroundStyle(.primary)
+                        Spacer()
+                        if cat.category == selectedCategory {
+                            Image(systemName: "checkmark")
+                                .foregroundStyle(Color.accentColor)
+                        }
+                    }
+                }
+            }
+            .navigationTitle("Select Type")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+            }
+        }
+        .presentationDetents([.medium])
+    }
+}
+
+
+// ===== Sources/AssetKit/Capture/BoundingBoxSelector.swift =====
+//
+//  BoundingBoxSelector.swift
+//  AssetKit
+//
+//  Allows user to draw and adjust a bounding box on a captured image.
+//
+
+import SwiftUI
+
+public struct BoundingBoxSelector: View {
+    let image: UIImage
+    let onConfirm: (CGRect) -> Void  // Normalized 0-1 coordinates
+    let onRetake: () -> Void
+    
+    @State private var boxRect: CGRect = .zero
+    @State private var isDragging = false
+    @State private var dragStart: CGPoint = .zero
+    @State private var activeHandle: Handle? = nil
+    @State private var imageFrame: CGRect = .zero
+    
+    private let handleSize: CGFloat = 44
+    private let minBoxSize: CGFloat = 50
+    
+    enum Handle {
+        case topLeft, topRight, bottomLeft, bottomRight
+        case top, bottom, left, right
+        case move
+    }
+    
+    public init(
+        image: UIImage,
+        onConfirm: @escaping (CGRect) -> Void,
+        onRetake: @escaping () -> Void
+    ) {
+        self.image = image
+        self.onConfirm = onConfirm
+        self.onRetake = onRetake
+    }
+    
+    public var body: some View {
+        ZStack {
+            Color.black.ignoresSafeArea()
+            
+            GeometryReader { geometry in
+                let imageSize = calculateImageSize(in: geometry.size)
+                let imageOrigin = CGPoint(
+                    x: (geometry.size.width - imageSize.width) / 2,
+                    y: (geometry.size.height - imageSize.height) / 2
+                )
+                
+                ZStack {
+                    // Image
+                    Image(uiImage: image)
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                        .frame(width: imageSize.width, height: imageSize.height)
+                        .position(x: geometry.size.width / 2, y: geometry.size.height / 2)
+                    
+                    // Dimmed overlay outside selection
+                    if boxRect != .zero {
+                        DimmedOverlay(
+                            boxRect: boxRect,
+                            imageFrame: CGRect(origin: imageOrigin, size: imageSize)
+                        )
+                    }
+                    
+                    // Selection box
+                    if boxRect != .zero {
+                        SelectionBox(rect: boxRect, handleSize: handleSize)
+                    }
+                    
+                    // Gesture layer
+                    Color.clear
+                        .contentShape(Rectangle())
+                        .gesture(
+                            DragGesture(minimumDistance: 0)
+                                .onChanged { value in
+                                    handleDrag(value, imageOrigin: imageOrigin, imageSize: imageSize)
+                                }
+                                .onEnded { _ in
+                                    isDragging = false
+                                    activeHandle = nil
+                                }
+                        )
+                }
+                .onAppear {
+                    imageFrame = CGRect(origin: imageOrigin, size: imageSize)
+                    // Start with a default box in the center
+                    let defaultSize = min(imageSize.width, imageSize.height) * 0.6
+                    boxRect = CGRect(
+                        x: imageOrigin.x + (imageSize.width - defaultSize) / 2,
+                        y: imageOrigin.y + (imageSize.height - defaultSize) / 2,
+                        width: defaultSize,
+                        height: defaultSize
+                    )
+                }
+            }
+            
+            // UI Overlay
+            VStack {
+                // Instructions
+                Text("Drag the corners to select the item")
+                    .font(.headline)
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 12)
+                    .background(Capsule().fill(Color.black.opacity(0.7)))
+                    .padding(.top, 60)
+                
+                Spacer()
+                
+                // Buttons
+                VStack(spacing: 16) {
+                    Button {
+                        confirmSelection()
+                    } label: {
+                        Text("Continue")
+                            .font(.headline)
+                            .foregroundStyle(.white)
+                            .frame(maxWidth: .infinity)
+                            .padding()
+                            .background(Capsule().fill(Color.blue))
+                    }
+                    .padding(.horizontal)
+                    .disabled(boxRect == .zero)
+                    
+                    Button("Retake photo") {
+                        onRetake()
+                    }
+                    .font(.subheadline)
+                    .foregroundStyle(.white.opacity(0.8))
+                }
+                .padding(.bottom, 40)
+            }
+        }
+        .navigationBarHidden(true)
+        .statusBarHidden(true)
+    }
+    
+    // MARK: - Calculations
+    
+    private func calculateImageSize(in containerSize: CGSize) -> CGSize {
+        let imageAspect = image.size.width / image.size.height
+        let containerAspect = containerSize.width / containerSize.height
+        
+        if imageAspect > containerAspect {
+            // Image is wider
+            let width = containerSize.width
+            let height = width / imageAspect
+            return CGSize(width: width, height: height)
+        } else {
+            // Image is taller
+            let height = containerSize.height
+            let width = height * imageAspect
+            return CGSize(width: width, height: height)
+        }
+    }
+    
+    private func handleDrag(_ value: DragGesture.Value, imageOrigin: CGPoint, imageSize: CGSize) {
+        let location = value.location
+        
+        if !isDragging {
+            // Determine what we're dragging
+            isDragging = true
+            dragStart = value.startLocation
+            activeHandle = detectHandle(at: value.startLocation)
+        }
+        
+        guard let handle = activeHandle else { return }
+        
+        let delta = CGSize(
+            width: location.x - dragStart.x,
+            height: location.y - dragStart.y
+        )
+        
+        var newRect = boxRect
+        
+        switch handle {
+        case .move:
+            newRect.origin.x += delta.width
+            newRect.origin.y += delta.height
+            
+        case .topLeft:
+            newRect.origin.x += delta.width
+            newRect.origin.y += delta.height
+            newRect.size.width -= delta.width
+            newRect.size.height -= delta.height
+            
+        case .topRight:
+            newRect.origin.y += delta.height
+            newRect.size.width += delta.width
+            newRect.size.height -= delta.height
+            
+        case .bottomLeft:
+            newRect.origin.x += delta.width
+            newRect.size.width -= delta.width
+            newRect.size.height += delta.height
+            
+        case .bottomRight:
+            newRect.size.width += delta.width
+            newRect.size.height += delta.height
+            
+        case .top:
+            newRect.origin.y += delta.height
+            newRect.size.height -= delta.height
+            
+        case .bottom:
+            newRect.size.height += delta.height
+            
+        case .left:
+            newRect.origin.x += delta.width
+            newRect.size.width -= delta.width
+            
+        case .right:
+            newRect.size.width += delta.width
+        }
+        
+        // Enforce minimum size
+        if newRect.width < minBoxSize {
+            if handle == .topLeft || handle == .bottomLeft || handle == .left {
+                newRect.origin.x = boxRect.maxX - minBoxSize
+            }
+            newRect.size.width = minBoxSize
+        }
+        if newRect.height < minBoxSize {
+            if handle == .topLeft || handle == .topRight || handle == .top {
+                newRect.origin.y = boxRect.maxY - minBoxSize
+            }
+            newRect.size.height = minBoxSize
+        }
+        
+        // Constrain to image bounds
+        let imageBounds = CGRect(origin: imageOrigin, size: imageSize)
+        newRect = constrainRect(newRect, to: imageBounds)
+        
+        boxRect = newRect
+        dragStart = location
+    }
+    
+    private func detectHandle(at point: CGPoint) -> Handle {
+        let cornerRadius = handleSize
+        
+        // Check corners first
+        if distance(from: point, to: CGPoint(x: boxRect.minX, y: boxRect.minY)) < cornerRadius {
+            return .topLeft
+        }
+        if distance(from: point, to: CGPoint(x: boxRect.maxX, y: boxRect.minY)) < cornerRadius {
+            return .topRight
+        }
+        if distance(from: point, to: CGPoint(x: boxRect.minX, y: boxRect.maxY)) < cornerRadius {
+            return .bottomLeft
+        }
+        if distance(from: point, to: CGPoint(x: boxRect.maxX, y: boxRect.maxY)) < cornerRadius {
+            return .bottomRight
+        }
+        
+        // Check edges
+        let edgeThreshold: CGFloat = 30
+        if abs(point.y - boxRect.minY) < edgeThreshold && point.x > boxRect.minX && point.x < boxRect.maxX {
+            return .top
+        }
+        if abs(point.y - boxRect.maxY) < edgeThreshold && point.x > boxRect.minX && point.x < boxRect.maxX {
+            return .bottom
+        }
+        if abs(point.x - boxRect.minX) < edgeThreshold && point.y > boxRect.minY && point.y < boxRect.maxY {
+            return .left
+        }
+        if abs(point.x - boxRect.maxX) < edgeThreshold && point.y > boxRect.minY && point.y < boxRect.maxY {
+            return .right
+        }
+        
+        // Inside box = move
+        if boxRect.contains(point) {
+            return .move
+        }
+        
+        // Outside = draw new box (treat as move for simplicity)
+        return .move
+    }
+    
+    private func distance(from p1: CGPoint, to p2: CGPoint) -> CGFloat {
+        sqrt(pow(p2.x - p1.x, 2) + pow(p2.y - p1.y, 2))
+    }
+    
+    private func constrainRect(_ rect: CGRect, to bounds: CGRect) -> CGRect {
+        var result = rect
+        
+        if result.minX < bounds.minX {
+            result.origin.x = bounds.minX
+        }
+        if result.minY < bounds.minY {
+            result.origin.y = bounds.minY
+        }
+        if result.maxX > bounds.maxX {
+            result.origin.x = bounds.maxX - result.width
+        }
+        if result.maxY > bounds.maxY {
+            result.origin.y = bounds.maxY - result.height
+        }
+        
+        return result
+    }
+    
+    private func confirmSelection() {
+        // Convert box to normalized coordinates relative to image
+        let normalizedRect = CGRect(
+            x: (boxRect.minX - imageFrame.minX) / imageFrame.width,
+            y: (boxRect.minY - imageFrame.minY) / imageFrame.height,
+            width: boxRect.width / imageFrame.width,
+            height: boxRect.height / imageFrame.height
+        )
+        
+        onConfirm(normalizedRect)
+    }
+}
+
+// MARK: - Dimmed Overlay
+
+private struct DimmedOverlay: View {
+    let boxRect: CGRect
+    let imageFrame: CGRect
+    
+    var body: some View {
+        Canvas { context, size in
+            // Fill entire area with dim
+            context.fill(
+                Path(CGRect(origin: .zero, size: size)),
+                with: .color(.black.opacity(0.5))
+            )
+            
+            // Cut out the selection box
+            context.blendMode = .destinationOut
+            context.fill(
+                Path(boxRect),
+                with: .color(.white)
+            )
+        }
+        .allowsHitTesting(false)
+    }
+}
+
+// MARK: - Selection Box
+
+private struct SelectionBox: View {
+    let rect: CGRect
+    let handleSize: CGFloat
+    
+    var body: some View {
+        ZStack {
+            // Border
+            Rectangle()
+                .stroke(Color.white, lineWidth: 2)
+                .frame(width: rect.width, height: rect.height)
+                .position(x: rect.midX, y: rect.midY)
+            
+            // Corner handles
+            ForEach(corners, id: \.0) { corner in
+                CornerHandle()
+                    .position(corner.1)
+            }
+            
+            // Grid lines (rule of thirds)
+            GridLines(rect: rect)
+        }
+    }
+    
+    private var corners: [(String, CGPoint)] {
+        [
+            ("tl", CGPoint(x: rect.minX, y: rect.minY)),
+            ("tr", CGPoint(x: rect.maxX, y: rect.minY)),
+            ("bl", CGPoint(x: rect.minX, y: rect.maxY)),
+            ("br", CGPoint(x: rect.maxX, y: rect.maxY))
+        ]
+    }
+}
+
+// MARK: - Corner Handle
+
+private struct CornerHandle: View {
+    var body: some View {
+        Circle()
+            .fill(Color.white)
+            .frame(width: 20, height: 20)
+            .shadow(color: .black.opacity(0.3), radius: 2, x: 0, y: 1)
+    }
+}
+
+// MARK: - Grid Lines
+
+private struct GridLines: View {
+    let rect: CGRect
+    
+    var body: some View {
+        Canvas { context, size in
+            let thirdWidth = rect.width / 3
+            let thirdHeight = rect.height / 3
+            
+            // Vertical lines
+            for i in 1...2 {
+                let x = rect.minX + thirdWidth * CGFloat(i)
+                var path = Path()
+                path.move(to: CGPoint(x: x, y: rect.minY))
+                path.addLine(to: CGPoint(x: x, y: rect.maxY))
+                context.stroke(path, with: .color(.white.opacity(0.4)), lineWidth: 1)
+            }
+            
+            // Horizontal lines
+            for i in 1...2 {
+                let y = rect.minY + thirdHeight * CGFloat(i)
+                var path = Path()
+                path.move(to: CGPoint(x: rect.minX, y: y))
+                path.addLine(to: CGPoint(x: rect.maxX, y: y))
+                context.stroke(path, with: .color(.white.opacity(0.4)), lineWidth: 1)
+            }
+        }
+        .allowsHitTesting(false)
+    }
+}
+
+// MARK: - Image Cropping Extension
+
+public extension UIImage {
+    /// Crop image to normalized rect (0-1 coordinates)
+    func cropped(to normalizedRect: CGRect) -> UIImage? {
+        // First, normalize the image to .up orientation
+        guard let normalizedImage = normalizedToUp(),
+              let cgImage = normalizedImage.cgImage else {
+            return nil
+        }
+        
+        let imageWidth = CGFloat(cgImage.width)
+        let imageHeight = CGFloat(cgImage.height)
+        
+        let cropRect = CGRect(
+            x: normalizedRect.minX * imageWidth,
+            y: normalizedRect.minY * imageHeight,
+            width: normalizedRect.width * imageWidth,
+            height: normalizedRect.height * imageHeight
+        )
+        
+        guard let croppedCGImage = cgImage.cropping(to: cropRect) else {
+            return nil
+        }
+        
+        return UIImage(cgImage: croppedCGImage, scale: scale, orientation: .up)
+    }
+    
+    /// Redraw the image with .up orientation
+    private func normalizedToUp() -> UIImage? {
+        guard imageOrientation != .up else { return self }
+        
+        UIGraphicsBeginImageContextWithOptions(size, false, scale)
+        draw(in: CGRect(origin: .zero, size: size))
+        let normalizedImage = UIGraphicsGetImageFromCurrentImageContext()
+        UIGraphicsEndImageContext()
+        
+        return normalizedImage
+    }
+}
+
+
+// ===== Sources/AssetKit/Capture/AssetCaptureCoordinator.swift =====
+//
+//  AssetCaptureCoordinator.swift
+//  AssetKit
+//
+//  Created by Jim Bergren on 1/23/26.
+//
+
+import SwiftUI
+import CastleMindrModels
+
+// MARK: - Capture Context
+
+public enum AssetCaptureContext {
+    case property(propertyId: String)
+    case room(propertyId: String, areaId: String)
+}
+
+// MARK: - Capture Result
+
+public enum AssetCaptureResult {
+    case completed(asset: Asset, trainingData: TrainingSample?)
+    case cancelled
+}
+
+// MARK: - Coordinator
+
+@MainActor
+public final class AssetCaptureCoordinator: ObservableObject {
+    
+    public let context: AssetCaptureContext
+    private var onComplete: ((AssetCaptureResult) -> Void)?
+    
+    public init(context: AssetCaptureContext) {
+        self.context = context
+    }
+    
+    public func start(onComplete: @escaping (AssetCaptureResult) -> Void) {
+        self.onComplete = onComplete
+    }
+    
+    public func complete(with asset: Asset, trainingData: TrainingSample? = nil) {
+        print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+        print("✅ AssetKit: Asset capture completed")
+        print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+        print("   ID: \(asset.id)")
+        print("   Name: \(asset.name)")
+        print("   Type: \(asset.type.rawValue)")
+        print("   Brand: \(asset.brand ?? "nil")")
+        print("   Manufacturer: \(asset.manufacturer ?? "nil")")
+        print("   Model: \(asset.modelNumber ?? "nil")")
+        print("   Serial: \(asset.serialNumber ?? "nil")")
+        if let training = trainingData {
+            print("   Training data: ✓")
+            print("      - AI predicted: \(training.aiPredictedCategory)")
+            print("      - AI predicted brand: \(training.aiPredictedBrand ?? "nil")")
+            print("      - User corrected category: \(training.userCorrectedCategory)")
+            print("      - User corrected brand: \(training.userCorrectedBrand)")
+            print("      - Label extraction: \(training.labelExtractionSource ?? "none")")
+            print("      - User final model: \(training.userFinalModelNumber ?? "nil")")
+            print("      - User final serial: \(training.userFinalSerialNumber ?? "nil")")
+        } else {
+            print("   Training data: none")
+        }
+        print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+        
+        onComplete?(.completed(asset: asset, trainingData: trainingData))
+    }
+    
+    public func cancel() {
+        print("❌ AssetKit: Asset capture cancelled")
+        onComplete?(.cancelled)
+    }
+}
+
+
+// ===== Sources/AssetKit/Capture/AssetCaptureView.swift =====
+//
+//  AssetCaptureView.swift
+//  AssetKit
+//
+//  Created by Jim Bergren on 1/23/26.
+//
+
+import SwiftUI
+import CastleMindrModels
+
+// Disambiguate TrainingSample type
+typealias LocalTrainingSample = TrainingSample
+
+// MARK: - Flow State
+
+public enum AssetCaptureFlowState {
+    case entrySelection
+    case objectRecognition
+    case confirmRecognition(RecognitionResult)
+    case guidedLabelScan(RecognitionResult)
+    case labelLocationPicker(RecognitionResult, LabelScanResult)
+    case form(AssetFormData)
+}
+
+// MARK: - Form Data
+
+public struct AssetFormData {
+    public var name: String
+    public var category: ApplianceCategory
+    public var brand: String
+    public var manufacturer: String
+    public var modelNumber: String
+    public var serialNumber: String
+    public var purchaseDate: Date?
+    public var warrantyExpires: Date?
+    public var notes: String
+    public var applianceImage: UIImage?
+    public var labelImage: UIImage?
+
+    // For training data
+    public var originalRecognition: RecognitionResult?
+    public var labelScan: LabelScanResult?
+
+    public init(
+        name: String = "",
+        category: ApplianceCategory = .unknown,
+        brand: String = "",
+        manufacturer: String = "",
+        modelNumber: String = "",
+        serialNumber: String = "",
+        purchaseDate: Date? = nil,
+        warrantyExpires: Date? = nil,
+        notes: String = "",
+        applianceImage: UIImage? = nil,
+        labelImage: UIImage? = nil,
+        originalRecognition: RecognitionResult? = nil,
+        labelScan: LabelScanResult? = nil
+    ) {
+        self.name = name
+        self.category = category
+        self.brand = brand
+        self.manufacturer = manufacturer
+        self.modelNumber = modelNumber
+        self.serialNumber = serialNumber
+        self.purchaseDate = purchaseDate
+        self.warrantyExpires = warrantyExpires
+        self.notes = notes
+        self.applianceImage = applianceImage
+        self.labelImage = labelImage
+        self.originalRecognition = originalRecognition
+        self.labelScan = labelScan
+    }
+
+    public static func from(recognition: RecognitionResult) -> AssetFormData {
+        AssetFormData(
+            category: recognition.category,
+            brand: recognition.brand ?? "",
+            applianceImage: recognition.capturedImage,
+            originalRecognition: recognition
+        )
+    }
+
+    public static func from(recognition: RecognitionResult, labelScan: LabelScanResult?) -> AssetFormData {
+        AssetFormData(
+            category: recognition.category,
+            brand: recognition.brand ?? "",
+            manufacturer: labelScan?.ocrFields.manufacturer?.text ?? "",
+            modelNumber: labelScan?.ocrFields.modelNumber?.text ?? "",
+            serialNumber: labelScan?.ocrFields.serialNumber?.text ?? "",
+            applianceImage: recognition.capturedImage,
+            labelImage: labelScan?.labelImage,
+            originalRecognition: recognition,
+            labelScan: labelScan
+        )
+    }
+}
+
+// MARK: - Capture View
+
+public struct AssetCaptureView: View {
+    @ObservedObject var coordinator: AssetCaptureCoordinator
+    @StateObject private var knowledgeBase: ApplianceKnowledgeBase
+    
+    @State private var flowState: AssetCaptureFlowState = .entrySelection
+    @State private var navigationPath = NavigationPath()
+    
+    public init(
+        coordinator: AssetCaptureCoordinator,
+        knowledgeProvider: KnowledgeProvider = BundledKnowledgeProvider()
+    ) {
+        self.coordinator = coordinator
+        self._knowledgeBase = StateObject(wrappedValue: ApplianceKnowledgeBase(provider: knowledgeProvider))
+    }
+    
+    public var body: some View {
+        NavigationStack(path: $navigationPath) {
+            EntryPointSelectionView(
+                onScanAppliance: { startObjectRecognition() },
+                onScanReceipt: { /* CAS-91 */ },
+                onEnterManually: { startManualEntry() },
+                onCancel: { coordinator.cancel() }
+            )
+            .navigationDestination(for: AssetCaptureFlowState.self) { state in
+                destinationView(for: state)
+            }
+        }
+        .task {
+            await knowledgeBase.loadIfNeeded()
+        }
+        .environmentObject(knowledgeBase)
+    }
+    
+    // MARK: - Navigation
+    
+    @ViewBuilder
+    private func destinationView(for state: AssetCaptureFlowState) -> some View {
+        switch state {
+        case .entrySelection:
+            EmptyView()
+            
+        case .objectRecognition:
+            ObjectRecognitionView(
+                onRecognized: { result in
+                    navigationPath.append(AssetCaptureFlowState.confirmRecognition(result))
+                },
+                onSkip: { startManualEntry() },
+                onCancel: { coordinator.cancel() }
+            )
+            
+        case .confirmRecognition(let result):
+            ConfirmRecognitionView(
+                result: result,
+                onConfirm: { confirmedResult in
+                    navigationPath.append(AssetCaptureFlowState.guidedLabelScan(confirmedResult))
+                },
+                onRetry: {
+                    navigationPath.removeLast()
+                },
+                onSkipToForm: {
+                    let formData = AssetFormData.from(recognition: result)
+                    navigationPath.append(AssetCaptureFlowState.form(formData))
+                }
+            )
+            
+        case .guidedLabelScan(let recognition):
+            GuidedLabelScanView(
+                recognition: recognition,
+                onComplete: { labelScanResult in
+                    // Go to label location picker if we got OCR data
+                    if labelScanResult.ocrFields.hasMinimumData {
+                        navigationPath.append(AssetCaptureFlowState.labelLocationPicker(recognition, labelScanResult))
+                    } else {
+                        // No OCR data, skip picker
+                        let formData = AssetFormData.from(recognition: recognition, labelScan: labelScanResult)
+                        navigationPath.append(AssetCaptureFlowState.form(formData))
+                    }
+                },
+                onSkip: {
+                    let formData = AssetFormData.from(recognition: recognition, labelScan: nil)
+                    navigationPath.append(AssetCaptureFlowState.form(formData))
+                }
+            )
+        
+        case .labelLocationPicker(let recognition, let labelScanResult):
+            LabelLocationPickerView(
+                category: recognition.category,
+                onSelect: { location, customDescription in
+                    let formData = AssetFormData.from(
+                        recognition: recognition,
+                        labelScan: LabelScanResult(
+                            labelImage: labelScanResult.labelImage,
+                            ocrFields: labelScanResult.ocrFields,
+                            labelLocation: location,
+                            labelLocationSource: .userSelected,
+                            extractionSource: labelScanResult.extractionSource,
+                            customLocationDescription: customDescription
+                        )
+                    )
+                    navigationPath.append(AssetCaptureFlowState.form(formData))
+                },
+                onSkip: {
+                    let formData = AssetFormData.from(
+                        recognition: recognition,
+                        labelScan: LabelScanResult(
+                            labelImage: labelScanResult.labelImage,
+                            ocrFields: labelScanResult.ocrFields,
+                            labelLocation: nil,
+                            labelLocationSource: .skipped,
+                            extractionSource: labelScanResult.extractionSource
+                        )
+                    )
+                    navigationPath.append(AssetCaptureFlowState.form(formData))
+                }
+            )
+            
+        case .form(let formData):
+            AssetFormView(
+                initialData: formData,
+                context: coordinator.context,
+                onSave: { [coordinator] (asset: Asset, trainingData: LocalTrainingSample?) in
+                    coordinator.complete(with: asset, trainingData: trainingData)
+                },
+                onCancel: { [coordinator] in
+                    coordinator.cancel()
+                }
+            )
+        }
+    }
+    
+    // MARK: - Actions
+    
+    private func startObjectRecognition() {
+        navigationPath.append(AssetCaptureFlowState.objectRecognition)
+    }
+    
+    private func startManualEntry() {
+        navigationPath.append(AssetCaptureFlowState.form(AssetFormData()))
+    }
+}
+
+// MARK: - Flow State Hashable
+
+extension AssetCaptureFlowState: Hashable {
+    public func hash(into hasher: inout Hasher) {
+        switch self {
+        case .entrySelection:
+            hasher.combine(0)
+        case .objectRecognition:
+            hasher.combine(1)
+        case .confirmRecognition(let result):
+            hasher.combine(2)
+            hasher.combine(result.category.rawValue)
+        case .guidedLabelScan(let result):
+            hasher.combine(3)
+            hasher.combine(result.category.rawValue)
+        case .labelLocationPicker(let result, _):
+            hasher.combine(4)
+            hasher.combine(result.category.rawValue)
+        case .form(let data):
+            hasher.combine(5)
+            hasher.combine(data.modelNumber)
+        }
+    }
+    
+    public static func == (lhs: AssetCaptureFlowState, rhs: AssetCaptureFlowState) -> Bool {
+        switch (lhs, rhs) {
+        case (.entrySelection, .entrySelection): return true
+        case (.objectRecognition, .objectRecognition): return true
+        case (.confirmRecognition(let l), .confirmRecognition(let r)): return l.category == r.category
+        case (.guidedLabelScan(let l), .guidedLabelScan(let r)): return l.category == r.category
+        case (.labelLocationPicker(let l, _), .labelLocationPicker(let r, _)): return l.category == r.category
+        case (.form(let l), .form(let r)): return l.modelNumber == r.modelNumber
+        default: return false
+        }
+    }
+}
+
+
+// ===== Sources/AssetKit/Capture/CameraView.swift =====
+//
+//  CameraView.swift
+//  AssetKit
+//
+//  Created by Jim Bergren on 1/25/26.
+//
+
+
+//
+//  CameraView.swift
+//  AssetKit
+//
+//  Full-featured camera with pinch to zoom, tap to focus, orientation support.
+//
+
+import SwiftUI
+import AVFoundation
+
+// MARK: - Camera View
+
+public struct CameraView: View {
+    @StateObject private var camera: CameraController
+    let onCapture: (UIImage) -> Void
+    
+    @State private var focusPoint: CGPoint?
+    @State private var showFocusIndicator = false
+    
+    public init(onCapture: @escaping (UIImage) -> Void) {
+        self._camera = StateObject(wrappedValue: CameraController())
+        self.onCapture = onCapture
+    }
+    
+    public var body: some View {
+        GeometryReader { geometry in
+            ZStack {
+                // Camera preview - full screen
+                CameraPreviewLayer(
+                    session: camera.session,
+                    videoGravity: .resizeAspectFill,
+                    orientation: camera.videoOrientation
+                )
+                .ignoresSafeArea()
+                .gesture(
+                    MagnificationGesture()
+                        .onChanged { scale in
+                            camera.zoom(scale)
+                        }
+                        .onEnded { _ in
+                            camera.zoomEnded()
+                        }
+                )
+                .gesture(
+                    SpatialTapGesture()
+                        .onEnded { event in
+                            let point = event.location
+                            let size = geometry.size
+                            
+                            // Convert to normalized coordinates (0-1)
+                            let normalizedPoint = CGPoint(
+                                x: point.x / size.width,
+                                y: point.y / size.height
+                            )
+                            
+                            camera.focus(at: normalizedPoint)
+                            
+                            // Show focus indicator
+                            focusPoint = point
+                            showFocusIndicator = true
+                            
+                            // Hide after delay
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                                showFocusIndicator = false
+                            }
+                        }
+                )
+                
+                // Focus indicator
+                if showFocusIndicator, let point = focusPoint {
+                    FocusIndicator()
+                        .position(point)
+                }
+                
+                // Permission denied overlay
+                if !camera.isAuthorized && !camera.isCheckingPermission {
+                    PermissionDeniedOverlay()
+                }
+            }
+        }
+        .onAppear {
+            camera.start()
+        }
+        .onDisappear {
+            camera.stop()
+        }
+    }
+    
+    // MARK: - Public Methods
+    
+    public func capture() {
+        camera.capturePhoto { image in
+            if let image = image {
+                onCapture(image)
+            }
+        }
+    }
+}
+
+// MARK: - Camera Controller
+
+@MainActor
+public final class CameraController: NSObject, ObservableObject {
+    @Published var isAuthorized = false
+    @Published var isCheckingPermission = true
+    @Published var videoOrientation: AVCaptureVideoOrientation = .portrait
+    
+    let session = AVCaptureSession()
+    private let output = AVCapturePhotoOutput()
+    private var device: AVCaptureDevice?
+    private var completion: ((UIImage?) -> Void)?
+    
+    // Zoom state
+    private var baseZoomFactor: CGFloat = 1.0
+    private var currentZoomFactor: CGFloat = 1.0
+    
+    override init() {
+        super.init()
+        setupOrientationObserver()
+    }
+    
+    deinit {
+        NotificationCenter.default.removeObserver(self)
+    }
+    
+    // MARK: - Setup
+    
+    func start() {
+        checkAuthorization()
+    }
+    
+    func stop() {
+        guard session.isRunning else { return }
+        Task.detached { [weak self] in
+            self?.session.stopRunning()
+        }
+    }
+    
+    private func checkAuthorization() {
+        isCheckingPermission = true
+        
+        switch AVCaptureDevice.authorizationStatus(for: .video) {
+        case .authorized:
+            isAuthorized = true
+            isCheckingPermission = false
+            setupSession()
+        case .notDetermined:
+            AVCaptureDevice.requestAccess(for: .video) { [weak self] granted in
+                Task { @MainActor in
+                    self?.isAuthorized = granted
+                    self?.isCheckingPermission = false
+                    if granted {
+                        self?.setupSession()
+                    }
+                }
+            }
+        default:
+            isAuthorized = false
+            isCheckingPermission = false
+        }
+    }
+    
+    private func setupSession() {
+        guard !session.isRunning else { return }
+        
+        session.beginConfiguration()
+        session.sessionPreset = .photo
+        
+        // Input
+        guard let device = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back),
+              let input = try? AVCaptureDeviceInput(device: device),
+              session.canAddInput(input) else {
+            session.commitConfiguration()
+            return
+        }
+        
+        self.device = device
+        session.addInput(input)
+        
+        // Output
+        if session.canAddOutput(output) {
+            session.addOutput(output)
+            output.isHighResolutionCaptureEnabled = true
+        }
+        
+        session.commitConfiguration()
+        
+        // Update orientation
+        updateVideoOrientation()
+        
+        Task.detached { [weak self] in
+            self?.session.startRunning()
+        }
+    }
+    
+    // MARK: - Orientation
+    
+    private func setupOrientationObserver() {
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(orientationChanged),
+            name: UIDevice.orientationDidChangeNotification,
+            object: nil
+        )
+    }
+    
+    @objc private func orientationChanged() {
+        Task { @MainActor in
+            updateVideoOrientation()
+        }
+    }
+    
+    private func updateVideoOrientation() {
+        let deviceOrientation = UIDevice.current.orientation
+        
+        switch deviceOrientation {
+        case .portrait:
+            videoOrientation = .portrait
+        case .portraitUpsideDown:
+            videoOrientation = .portraitUpsideDown
+        case .landscapeLeft:
+            videoOrientation = .landscapeRight // Inverted
+        case .landscapeRight:
+            videoOrientation = .landscapeLeft // Inverted
+        default:
+            // Keep current
+            break
+        }
+    }
+    
+    // MARK: - Zoom
+    
+    func zoom(_ scale: CGFloat) {
+        guard let device = device else { return }
+        
+        let newZoom = baseZoomFactor * scale
+        let clampedZoom = min(max(newZoom, 1.0), device.activeFormat.videoMaxZoomFactor)
+        
+        do {
+            try device.lockForConfiguration()
+            device.videoZoomFactor = clampedZoom
+            device.unlockForConfiguration()
+            currentZoomFactor = clampedZoom
+        } catch {
+            print("Failed to set zoom: \(error)")
+        }
+    }
+    
+    func zoomEnded() {
+        baseZoomFactor = currentZoomFactor
+    }
+    
+    // MARK: - Focus
+    
+    func focus(at point: CGPoint) {
+        guard let device = device else { return }
+        
+        do {
+            try device.lockForConfiguration()
+            
+            if device.isFocusPointOfInterestSupported {
+                device.focusPointOfInterest = point
+                device.focusMode = .autoFocus
+            }
+            
+            if device.isExposurePointOfInterestSupported {
+                device.exposurePointOfInterest = point
+                device.exposureMode = .autoExpose
+            }
+            
+            device.unlockForConfiguration()
+        } catch {
+            print("Failed to set focus: \(error)")
+        }
+    }
+    
+    // MARK: - Capture
+    
+    func capturePhoto(completion: @escaping (UIImage?) -> Void) {
+        self.completion = completion
+        
+        let settings = AVCapturePhotoSettings()
+        
+        // Set orientation for capture
+        if let connection = output.connection(with: .video) {
+            connection.videoOrientation = videoOrientation
+        }
+        
+        output.capturePhoto(with: settings, delegate: self)
+    }
+}
+
+// MARK: - Photo Capture Delegate
+
+extension CameraController: AVCapturePhotoCaptureDelegate {
+    nonisolated public func photoOutput(_ output: AVCapturePhotoOutput, didFinishProcessingPhoto photo: AVCapturePhoto, error: Error?) {
+        guard let data = photo.fileDataRepresentation(),
+              let image = UIImage(data: data) else {
+            Task { @MainActor in
+                self.completion?(nil)
+            }
+            return
+        }
+        
+        Task { @MainActor in
+            self.completion?(image)
+        }
+    }
+}
+
+// MARK: - Camera Preview Layer
+
+struct CameraPreviewLayer: UIViewRepresentable {
+    let session: AVCaptureSession
+    let videoGravity: AVLayerVideoGravity
+    let orientation: AVCaptureVideoOrientation
+    
+    func makeUIView(context: Context) -> PreviewView {
+        let view = PreviewView()
+        view.previewLayer.session = session
+        view.previewLayer.videoGravity = videoGravity
+        return view
+    }
+    
+    func updateUIView(_ uiView: PreviewView, context: Context) {
+        uiView.previewLayer.connection?.videoOrientation = orientation
+    }
+    
+    class PreviewView: UIView {
+        override class var layerClass: AnyClass {
+            AVCaptureVideoPreviewLayer.self
+        }
+        
+        var previewLayer: AVCaptureVideoPreviewLayer {
+            layer as! AVCaptureVideoPreviewLayer
+        }
+        
+        override func layoutSubviews() {
+            super.layoutSubviews()
+            previewLayer.frame = bounds
+        }
+    }
+}
+
+// MARK: - Focus Indicator
+
+struct FocusIndicator: View {
+    @State private var scale: CGFloat = 1.5
+    @State private var opacity: Double = 1.0
+    
+    var body: some View {
+        RoundedRectangle(cornerRadius: 4)
+            .stroke(Color.yellow, lineWidth: 2)
+            .frame(width: 80, height: 80)
+            .scaleEffect(scale)
+            .opacity(opacity)
+            .onAppear {
+                withAnimation(.easeOut(duration: 0.3)) {
+                    scale = 1.0
+                }
+                withAnimation(.easeOut(duration: 1.0).delay(0.5)) {
+                    opacity = 0.0
+                }
+            }
+    }
+}
+
+// MARK: - Permission Denied Overlay
+
+struct PermissionDeniedOverlay: View {
+    var body: some View {
+        ZStack {
+            Color.black.ignoresSafeArea()
+            
+            VStack(spacing: 16) {
+                Image(systemName: "camera.fill")
+                    .font(.system(size: 48))
+                    .foregroundStyle(.white.opacity(0.5))
+                
+                Text("Camera access required")
+                    .font(.headline)
+                    .foregroundStyle(.white.opacity(0.8))
+                
+                Text("Enable camera access in Settings to scan items")
+                    .font(.subheadline)
+                    .foregroundStyle(.white.opacity(0.6))
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal)
+                
+                Button("Open Settings") {
+                    if let url = URL(string: UIApplication.openSettingsURLString) {
+                        UIApplication.shared.open(url)
+                    }
+                }
+                .buttonStyle(.bordered)
+                .tint(.white)
+                .padding(.top, 8)
+            }
+        }
+    }
+}
+
+// MARK: - Capturable Camera View
+
+/// A camera view with external capture control
+public struct CapturableCameraView: View {
+    @ObservedObject var controller: CameraController
+    
+    @State private var focusPoint: CGPoint?
+    @State private var showFocusIndicator = false
+    
+    public init(controller: CameraController) {
+        self.controller = controller
+    }
+    
+    public var body: some View {
+        GeometryReader { geometry in
+            ZStack {
+                CameraPreviewLayer(
+                    session: controller.session,
+                    videoGravity: .resizeAspectFill,
+                    orientation: controller.videoOrientation
+                )
+                .ignoresSafeArea()
+                .gesture(
+                    MagnificationGesture()
+                        .onChanged { scale in
+                            controller.zoom(scale)
+                        }
+                        .onEnded { _ in
+                            controller.zoomEnded()
+                        }
+                )
+                .gesture(
+                    SpatialTapGesture()
+                        .onEnded { event in
+                            let point = event.location
+                            let size = geometry.size
+                            
+                            let normalizedPoint = CGPoint(
+                                x: point.x / size.width,
+                                y: point.y / size.height
+                            )
+                            
+                            controller.focus(at: normalizedPoint)
+                            
+                            focusPoint = point
+                            showFocusIndicator = true
+                            
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                                showFocusIndicator = false
+                            }
+                        }
+                )
+                
+                if showFocusIndicator, let point = focusPoint {
+                    FocusIndicator()
+                        .position(point)
+                }
+                
+                if !controller.isAuthorized && !controller.isCheckingPermission {
+                    PermissionDeniedOverlay()
+                }
+            }
+        }
+        .onAppear {
+            controller.start()
+        }
+        .onDisappear {
+            controller.stop()
+        }
+    }
+}
+
+// ===== Sources/AssetKit/Capture/EntryPointSelectionView.swift =====
+//
+//  EntryPointSelectionView.swift
+//  AssetKit
+//
+//  Created by Jim Bergren on 1/23/26.
+//
+
+import SwiftUI
+
+public struct EntryPointSelectionView: View {
+    let onScanAppliance: () -> Void
+    let onScanReceipt: () -> Void
+    let onEnterManually: () -> Void
+    let onCancel: () -> Void
+    
+    public init(
+        onScanAppliance: @escaping () -> Void,
+        onScanReceipt: @escaping () -> Void,
+        onEnterManually: @escaping () -> Void,
+        onCancel: @escaping () -> Void
+    ) {
+        self.onScanAppliance = onScanAppliance
+        self.onScanReceipt = onScanReceipt
+        self.onEnterManually = onEnterManually
+        self.onCancel = onCancel
+    }
+    
+    public var body: some View {
+        VStack(spacing: 24) {
+            Spacer()
+            
+            Text("Add an Asset")
+                .font(.title)
+                .fontWeight(.semibold)
+            
+            Text("How would you like to add this item?")
+                .foregroundStyle(.secondary)
+            
+            Spacer()
+            
+            VStack(spacing: 16) {
+                EntryOptionButton(
+                    icon: "camera.fill",
+                    title: "Scan Appliance",
+                    subtitle: "Point camera at the appliance",
+                    action: onScanAppliance
+                )
+                
+                EntryOptionButton(
+                    icon: "doc.text.fill",
+                    title: "Scan Receipt",
+                    subtitle: "Capture purchase info",
+                    isEnabled: false, // CAS-91
+                    action: onScanReceipt
+                )
+                
+                EntryOptionButton(
+                    icon: "pencil",
+                    title: "Enter Manually",
+                    subtitle: "Type in the details",
+                    action: onEnterManually
+                )
+            }
+            .padding(.horizontal)
+            
+            Spacer()
+        }
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .cancellationAction) {
+                Button("Cancel", action: onCancel)
+            }
+        }
+    }
+}
+
+// MARK: - Entry Option Button
+
+private struct EntryOptionButton: View {
+    let icon: String
+    let title: String
+    let subtitle: String
+    var isEnabled: Bool = true
+    let action: () -> Void
+    
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 16) {
+                Image(systemName: icon)
+                    .font(.title2)
+                    .frame(width: 44, height: 44)
+                    .background(isEnabled ? Color.accentColor.opacity(0.1) : Color.gray.opacity(0.1))
+                    .foregroundStyle(isEnabled ? Color.accentColor : Color.gray)
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                        .font(.headline)
+                        .foregroundStyle(isEnabled ? .primary : .secondary)
+                    
+                    Text(subtitle)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+                
+                Spacer()
+                
+                Image(systemName: "chevron.right")
+                    .foregroundStyle(.tertiary)
+            }
+            .padding()
+            .background(Color(.secondarySystemBackground))
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+        }
+        .disabled(!isEnabled)
+    }
+}
+
+
+// ===== Sources/AssetKit/Capture/ObjectRecognitionView.swift =====
+//
+//  ObjectRecognitionView.swift
+//  AssetKit
+//
+//  Created by Jim Bergren on 1/23/26.
+//
+
+import SwiftUI
+import AVFoundation
+
+public struct ObjectRecognitionView: View {
+    let onRecognized: (RecognitionResult) -> Void
+    let onSkip: () -> Void
+    let onCancel: () -> Void
+    
+    @StateObject private var camera = CameraController()
+    @State private var viewState: ViewState = .camera
+    @State private var capturedImage: UIImage?
+    @State private var croppedImage: UIImage?
+    @State private var boundingBox: CGRect?
+    @State private var isProcessing = false
+    @State private var errorMessage: String?
+    
+    enum ViewState {
+        case camera
+        case selectRegion
+        case processing
+    }
+    
+    public init(
+        onRecognized: @escaping (RecognitionResult) -> Void,
+        onSkip: @escaping () -> Void,
+        onCancel: @escaping () -> Void
+    ) {
+        self.onRecognized = onRecognized
+        self.onSkip = onSkip
+        self.onCancel = onCancel
+    }
+    
+    public var body: some View {
+        ZStack {
+            switch viewState {
+            case .camera:
+                cameraView
+                
+            case .selectRegion:
+                if let image = capturedImage {
+                    BoundingBoxSelector(
+                        image: image,
+                        onConfirm: { normalizedRect in
+                            boundingBox = normalizedRect
+                            if let cropped = image.cropped(to: normalizedRect) {
+                                croppedImage = cropped
+                                recognizeItem(cropped)
+                            } else {
+                                // Fallback to full image
+                                recognizeItem(image)
+                            }
+                        },
+                        onRetake: {
+                            capturedImage = nil
+                            viewState = .camera
+                        }
+                    )
+                }
+                
+            case .processing:
+                processingView
+            }
+        }
+        .navigationBarHidden(true)
+        .statusBarHidden(true)
+    }
+    
+    // MARK: - Camera View
+    
+    private var cameraView: some View {
+        ZStack {
+            CapturableCameraView(controller: camera)
+            
+            // UI overlay
+            VStack {
+                // Top bar
+                HStack {
+                    Button {
+                        onCancel()
+                    } label: {
+                        Image(systemName: "xmark")
+                            .font(.title2)
+                            .foregroundStyle(.white)
+                            .padding(12)
+                            .background(Circle().fill(Color.black.opacity(0.5)))
+                    }
+                    
+                    Spacer()
+                }
+                .padding()
+                
+                Spacer()
+                
+                // Instructions
+                Text("Take a photo of the item")
+                    .font(.headline)
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 10)
+                    .background(Capsule().fill(Color.black.opacity(0.6)))
+                
+                if let error = errorMessage {
+                    Text(error)
+                        .font(.caption)
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 8)
+                        .background(Capsule().fill(Color.red.opacity(0.8)))
+                        .padding(.top, 8)
+                }
+                
+                Spacer()
+                
+                // Bottom controls
+                VStack(spacing: 20) {
+                    // Capture button
+                    Button {
+                        capturePhoto()
+                    } label: {
+                        ZStack {
+                            Circle()
+                                .fill(Color.white)
+                                .frame(width: 72, height: 72)
+                            
+                            Circle()
+                                .stroke(Color.white, lineWidth: 4)
+                                .frame(width: 84, height: 84)
+                        }
+                    }
+                    .disabled(!camera.isAuthorized)
+                    
+                    // Skip option
+                    Button("Enter manually") {
+                        onSkip()
+                    }
+                    .font(.subheadline)
+                    .foregroundStyle(.white.opacity(0.8))
+                }
+                .padding(.bottom, 40)
+            }
+        }
+    }
+    
+    // MARK: - Processing View
+    
+    private var processingView: some View {
+        ZStack {
+            // Show the full captured image during processing
+            if let image = capturedImage {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFill()
+                    .ignoresSafeArea()
+            } else {
+                Color.black.ignoresSafeArea()
+            }
+            
+            Color.black.opacity(0.6)
+                .ignoresSafeArea()
+            
+            VStack(spacing: 16) {
+                ProgressView()
+                    .scaleEffect(1.5)
+                    .tint(.white)
+                Text("Identifying...")
+                    .font(.headline)
+                    .foregroundStyle(.white)
+            }
+        }
+    }
+    
+    // MARK: - Actions
+    
+    private func capturePhoto() {
+        errorMessage = nil
+        
+        camera.capturePhoto { image in
+            guard let image else {
+                errorMessage = "Failed to capture photo"
+                return
+            }
+            
+            capturedImage = image
+            viewState = .selectRegion
+        }
+    }
+    
+    private func recognizeItem(_ image: UIImage) {
+        viewState = .processing
+        isProcessing = true
+        
+        Task {
+            do {
+                var result = try await RecognitionAPIService.shared.recognize(image)
+                
+                // Attach the full captured image (not cropped) for the asset
+                // but store bounding box info for training
+                result = RecognitionResult(
+                    category: result.category,
+                    brand: result.brand,
+                    manufacturer: result.manufacturer,
+                    confidence: result.confidence,
+                    capturedImage: capturedImage,  // Full image
+                    boundingBox: boundingBox       // Where the item is
+                )
+                
+                await MainActor.run {
+                    isProcessing = false
+                    onRecognized(result)
+                }
+            } catch {
+                await MainActor.run {
+                    isProcessing = false
+                    errorMessage = error.localizedDescription
+                    viewState = .camera
+                    capturedImage = nil
+                    croppedImage = nil
+                    boundingBox = nil
+                }
+            }
+        }
+    }
+}
+
+
+// ===== Sources/AssetKit/Capture/GuidedLabelScanView.swift =====
+//
+//  GuidedLabelScanView.swift
+//  AssetKit
+//
+//  Created by Jim Bergren on 1/23/26.
+//
+
+import SwiftUI
+import AVFoundation
+import Vision
+import os.log
+
+private let ocrLog = Logger(subsystem: "com.castlemindr.AssetKit", category: "OCR")
+
+public struct GuidedLabelScanView: View {
+    let recognition: RecognitionResult
+    let onComplete: (LabelScanResult) -> Void
+    let onSkip: () -> Void
+    
+    @EnvironmentObject private var knowledgeBase: ApplianceKnowledgeBase
+    @StateObject private var camera = CameraController()
+    
+    @State private var capturedImage: UIImage?
+    @State private var isProcessing = false
+    @State private var processingStage = "Reading label..."
+    @State private var detectedModel = ""
+    @State private var detectedSerial = ""
+    @State private var detectedManufacturer = ""
+    @State private var rawOCRText = ""
+    @State private var errorMessage: String?
+    @State private var extractionSource = "heuristic"
+    @State private var geminiFields: OCRFields?
+    
+    public init(
+        recognition: RecognitionResult,
+        onComplete: @escaping (LabelScanResult) -> Void,
+        onSkip: @escaping () -> Void
+    ) {
+        self.recognition = recognition
+        self.onComplete = onComplete
+        self.onSkip = onSkip
+    }
+    
+    private var guidancePrompt: String {
+        knowledgeBase.guidancePrompt(
+            for: recognition.category,
+            manufacturer: recognition.brand
+        )
+    }
+    
+    private var hasMinimumData: Bool {
+        !detectedModel.isEmpty || !detectedSerial.isEmpty
+    }
+    
+    public var body: some View {
+        ZStack {
+            // Background: camera when capturing, black after capture
+            if capturedImage == nil {
+                CapturableCameraView(controller: camera)
+            } else {
+                Color.black.ignoresSafeArea()
+            }
+            
+            // Processing overlay
+            if isProcessing {
+                VStack(spacing: 16) {
+                    ProgressView()
+                        .scaleEffect(1.5)
+                        .tint(.white)
+                    Text(processingStage)
+                        .font(.headline)
+                        .foregroundStyle(.white)
+                }
+            }
+            
+            // UI overlay
+            VStack(spacing: 0) {
+                // Top bar with guidance
+                if capturedImage == nil && !isProcessing {
+                    Text(guidancePrompt)
+                        .font(.subheadline)
+                        .foregroundStyle(.white)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 20)
+                        .padding(.vertical, 12)
+                        .background(RoundedRectangle(cornerRadius: 12).fill(Color.black.opacity(0.7)))
+                        .padding(.horizontal)
+                        .padding(.top, 60)
+                }
+                
+                Spacer()
+                
+                // Error message
+                if let error = errorMessage {
+                    Text(error)
+                        .font(.caption)
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 8)
+                        .background(Capsule().fill(Color.red.opacity(0.8)))
+                        .padding(.bottom, 8)
+                }
+                
+                // Detected fields card (shown after scan)
+                if capturedImage != nil && !isProcessing {
+                    detectedFieldsCard
+                        .padding(.horizontal, 16)
+                        .padding(.bottom, 16)
+                }
+                
+                // Bottom controls
+                bottomControls
+                    .padding(.bottom, 40)
+            }
+        }
+        .navigationBarHidden(true)
+        .statusBarHidden(true)
+    }
+    
+    // MARK: - Detected Fields Card
+    
+    private var detectedFieldsCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Detected Info")
+                .font(.headline)
+                .foregroundStyle(.white)
+            
+            Divider()
+                .background(Color.white.opacity(0.3))
+            
+            // Model
+            fieldRow(
+                icon: detectedModel.isEmpty ? "circle" : "checkmark.circle.fill",
+                iconColor: detectedModel.isEmpty ? .white.opacity(0.5) : .green,
+                label: "Model",
+                value: $detectedModel,
+                placeholder: "Not detected"
+            )
+            
+            // Serial
+            fieldRow(
+                icon: detectedSerial.isEmpty ? "circle" : "checkmark.circle.fill",
+                iconColor: detectedSerial.isEmpty ? .white.opacity(0.5) : .green,
+                label: "Serial",
+                value: $detectedSerial,
+                placeholder: "Not detected"
+            )
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 16).fill(Color.black.opacity(0.85)))
+        .clipped()
+    }
+    
+    private func fieldRow(
+        icon: String,
+        iconColor: Color,
+        label: String,
+        value: Binding<String>,
+        placeholder: String
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 8) {
+                Image(systemName: icon)
+                    .foregroundStyle(iconColor)
+                    .frame(width: 20)
+                
+                Text(label)
+                    .font(.caption)
+                    .foregroundStyle(.white.opacity(0.6))
+            }
+            
+            TextField(placeholder, text: value)
+                .font(.body)
+                .foregroundStyle(.white)
+                .padding(.leading, 28)
+                .lineLimit(1)
+                .truncationMode(.tail)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+    
+    // MARK: - Bottom Controls
+    
+    private var bottomControls: some View {
+        VStack(spacing: 16) {
+            if capturedImage == nil {
+                // Capture button
+                Button {
+                    captureAndScan()
+                } label: {
+                    ZStack {
+                        Circle()
+                            .fill(Color.white)
+                            .frame(width: 72, height: 72)
+                        
+                        Circle()
+                            .stroke(Color.white, lineWidth: 4)
+                            .frame(width: 84, height: 84)
+                    }
+                }
+                .disabled(isProcessing || !camera.isAuthorized)
+                .opacity(isProcessing ? 0.5 : 1)
+            } else {
+                // Post-capture buttons
+                Button {
+                    submitResult()
+                } label: {
+                    Text(hasMinimumData ? "Use this info" : "Continue anyway")
+                        .font(.headline)
+                        .foregroundStyle(.white)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 16)
+                        .background(Capsule().fill(Color.blue))
+                }
+                .padding(.horizontal, 24)
+                
+                Button("Retake") {
+                    resetCapture()
+                }
+                .font(.subheadline)
+                .foregroundStyle(.white.opacity(0.8))
+            }
+            
+            // Skip option
+            Button("No label on this item") {
+                onSkip()
+            }
+            .font(.subheadline)
+            .foregroundStyle(.white.opacity(0.6))
+        }
+    }
+    
+    // MARK: - Actions
+    
+    private func captureAndScan() {
+        isProcessing = true
+        errorMessage = nil
+        
+        camera.capturePhoto { image in
+            guard let image else {
+                isProcessing = false
+                errorMessage = "Failed to capture photo"
+                return
+            }
+            
+            capturedImage = image
+            performOCR(on: image)
+        }
+    }
+    
+    private func performOCR(on image: UIImage) {
+        guard let cgImage = image.cgImage else {
+            isProcessing = false
+            errorMessage = "Failed to process image"
+            return
+        }
+        
+        let request = VNRecognizeTextRequest { request, error in
+            DispatchQueue.main.async {
+                if let error {
+                    self.isProcessing = false
+                    self.errorMessage = "OCR failed: \(error.localizedDescription)"
+                    return
+                }
+
+                guard let observations = request.results as? [VNRecognizedTextObservation] else {
+                    self.isProcessing = false
+                    ocrLog.warning("⚠️ No text observations returned from Vision")
+                    return
+                }
+
+                ocrLog.info("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+                ocrLog.info("📷 OCR SCAN — \(observations.count) text observation(s)")
+                ocrLog.info("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+
+                var allText: [String] = []
+                for (i, observation) in observations.enumerated() {
+                    let candidates = observation.topCandidates(3)
+                    let topText = candidates.first?.string ?? "(empty)"
+                    let topConf = candidates.first?.confidence ?? 0
+
+                    allText.append(topText)
+
+                    let altCandidates = candidates.dropFirst().map { "\"\($0.string)\" (\(String(format: "%.0f%%", $0.confidence * 100)))" }.joined(separator: ", ")
+                    let altStr = altCandidates.isEmpty ? "none" : altCandidates
+
+                    ocrLog.info("  [\(i)] \"\(topText)\" — confidence: \(String(format: "%.0f%%", topConf * 100)) | alts: \(altStr)")
+                }
+
+                ocrLog.info("──────────────────────────────────────────")
+                ocrLog.info("📝 RAW TEXT DUMP:")
+                ocrLog.info("\(allText.joined(separator: "\n"))")
+                ocrLog.info("──────────────────────────────────────────")
+
+                self.rawOCRText = allText.joined(separator: "\n")
+
+                // Try Gemini extraction first, fall back to heuristic parsing
+                self.extractFieldsWithGemini(ocrLines: allText)
+            }
+        }
+        
+        request.recognitionLevel = .accurate
+        request.usesLanguageCorrection = false
+        
+        let handler = VNImageRequestHandler(cgImage: cgImage, options: [:])
+        
+        DispatchQueue.global(qos: .userInitiated).async {
+            do {
+                try handler.perform([request])
+            } catch {
+                DispatchQueue.main.async {
+                    self.isProcessing = false
+                    self.errorMessage = "OCR failed: \(error.localizedDescription)"
+                }
+            }
+        }
+    }
+    
+    private func parseFields(from lines: [String]) {
+        let knowledge = knowledgeBase.knowledge(for: recognition.category)
+        let patterns = knowledge?.fieldPatterns ?? []
+
+        let modelHints = ["MODEL:", "MODEL ", "MOD:", "MOD ", "M/N:", "M/N ", "MODEL NO", "MODEL NUMBER"]
+        let serialHints = ["SERIAL:", "SERIAL ", "SER:", "SER ", "S/N:", "S/N ", "SERIAL NO", "SERIAL NUMBER"]
+
+        ocrLog.info("🔍 PARSING — category: \(self.recognition.category.rawValue), \(patterns.count) pattern(s) loaded")
+
+        // Track which lines have been claimed by hint-based extraction
+        var claimedLines: Set<Int> = []
+
+        // Pending hint: a hint was found on a line but no value followed on the same line.
+        // The value is likely on the next line.
+        var pendingField: String? = nil  // "model" or "serial"
+
+        // ── Pass 1: Hint-based extraction (with multi-line lookahead) ──
+
+        for (i, line) in lines.enumerated() {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            let upper = trimmed.uppercased()
+
+            ocrLog.info("  LINE[\(i)]: \"\(trimmed)\"")
+
+            // If previous line left a pending hint, this line is the value
+            if let pending = pendingField {
+                let cleaned = trimmed
+                    .trimmingCharacters(in: CharacterSet(charactersIn: ":.-# "))
+                    .trimmingCharacters(in: .whitespaces)
+
+                if cleaned.count >= 3 && cleaned.count <= 50 {
+                    if pending == "model" && detectedModel.isEmpty {
+                        detectedModel = cleaned
+                        claimedLines.insert(i)
+                        ocrLog.info("  ✅ MODEL from pending hint (next line[\(i)]): \"\(cleaned)\"")
+                    } else if pending == "serial" && detectedSerial.isEmpty {
+                        detectedSerial = cleaned
+                        claimedLines.insert(i)
+                        ocrLog.info("  ✅ SERIAL from pending hint (next line[\(i)]): \"\(cleaned)\"")
+                    }
+                } else {
+                    ocrLog.info("  ⏭️ Pending \(pending) — next line too short/long (\(cleaned.count) chars), skipping")
+                }
+                pendingField = nil
+            }
+
+            // Check for model hint
+            if detectedModel.isEmpty {
+                if let result = extractHintValue(from: trimmed, upper: upper, hints: modelHints) {
+                    switch result {
+                    case .value(let v):
+                        detectedModel = v
+                        claimedLines.insert(i)
+                        ocrLog.info("  ✅ MODEL extracted from line[\(i)]: \"\(v)\"")
+                    case .hintOnly:
+                        pendingField = "model"
+                        claimedLines.insert(i)
+                        ocrLog.info("  ⏳ MODEL hint found on line[\(i)] but no value — checking next line")
+                    }
+                }
+            }
+
+            // Check for serial hint
+            if detectedSerial.isEmpty {
+                if let result = extractHintValue(from: trimmed, upper: upper, hints: serialHints) {
+                    switch result {
+                    case .value(let v):
+                        detectedSerial = v
+                        claimedLines.insert(i)
+                        ocrLog.info("  ✅ SERIAL extracted from line[\(i)]: \"\(v)\"")
+                    case .hintOnly:
+                        pendingField = "serial"
+                        claimedLines.insert(i)
+                        ocrLog.info("  ⏳ SERIAL hint found on line[\(i)] but no value — checking next line")
+                    }
+                }
+            }
+        }
+
+        // ── Pass 2: Regex-based extraction on unclaimed lines ──
+
+        if !patterns.isEmpty && (detectedModel.isEmpty || detectedSerial.isEmpty) {
+            ocrLog.info("  📐 Pass 2: regex patterns on unclaimed lines...")
+
+            for (i, line) in lines.enumerated() {
+                guard !claimedLines.contains(i) else { continue }
+
+                let trimmed = line.trimmingCharacters(in: .whitespaces)
+
+                if detectedModel.isEmpty {
+                    if let model = extractRegex(from: trimmed, fieldName: "model", patterns: patterns) {
+                        detectedModel = model
+                        claimedLines.insert(i)
+                        ocrLog.info("  ✅ MODEL (regex) from line[\(i)]: \"\(model)\"")
+                    }
+                }
+
+                if detectedSerial.isEmpty {
+                    if let serial = extractRegex(from: trimmed, fieldName: "serial", patterns: patterns) {
+                        // Dedup guard: don't let serial be the same as model
+                        if serial == detectedModel {
+                            ocrLog.info("  ⛔ SERIAL (regex) from line[\(i)]: \"\(serial)\" — REJECTED (same as model)")
+                        } else {
+                            detectedSerial = serial
+                            claimedLines.insert(i)
+                            ocrLog.info("  ✅ SERIAL (regex) from line[\(i)]: \"\(serial)\"")
+                        }
+                    }
+                }
+            }
+        }
+
+        ocrLog.info("──────────────────────────────────────────")
+        ocrLog.info("📋 PARSE RESULT — model: \"\(self.detectedModel.isEmpty ? "(none)" : self.detectedModel)\" | serial: \"\(self.detectedSerial.isEmpty ? "(none)" : self.detectedSerial)\"")
+        ocrLog.info("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+    }
+
+    // MARK: - Hint Extraction
+
+    private enum HintResult {
+        case value(String)  // Hint found and value extracted on same line
+        case hintOnly       // Hint found but no value — check next line
+    }
+
+    private func extractHintValue(from line: String, upper: String, hints: [String]) -> HintResult? {
+        for hint in hints {
+            if upper.contains(hint) {
+                if let hintRange = upper.range(of: hint) {
+                    let afterHint = String(line[hintRange.upperBound...]).trimmingCharacters(in: .whitespaces)
+                    let cleaned = afterHint
+                        .trimmingCharacters(in: CharacterSet(charactersIn: ":.-# "))
+                        .trimmingCharacters(in: .whitespaces)
+
+                    if cleaned.count >= 3 && cleaned.count <= 50 {
+                        ocrLog.info("    🏷️ hint \"\(hint)\" → value: \"\(cleaned)\" ✅")
+                        return .value(cleaned)
+                    } else {
+                        ocrLog.info("    🏷️ hint \"\(hint)\" → afterHint: \"\(cleaned)\" (len \(cleaned.count)) — hint only")
+                        return .hintOnly
+                    }
+                }
+            }
+        }
+        return nil
+    }
+
+    // MARK: - Regex Extraction
+
+    private func extractRegex(from line: String, fieldName: String, patterns: [FieldPattern]) -> String? {
+        for pattern in patterns where pattern.fieldName == fieldName {
+            if let regex = try? NSRegularExpression(pattern: pattern.regex, options: .caseInsensitive) {
+                let range = NSRange(line.startIndex..., in: line)
+                if let match = regex.firstMatch(in: line, options: [], range: range) {
+                    if let matchRange = Range(match.range, in: line) {
+                        let matched = String(line[matchRange])
+                        ocrLog.info("    🔣 [\(fieldName)] regex /\(pattern.regex)/ matched: \"\(matched)\"")
+                        return matched
+                    }
+                }
+            }
+        }
+        return nil
+    }
+    
+    private func extractFieldsWithGemini(ocrLines: [String]) {
+        guard let image = capturedImage else {
+            // No image — fall back to heuristic
+            parseFields(from: ocrLines)
+            isProcessing = false
+            return
+        }
+
+        processingStage = "Analyzing with AI..."
+        ocrLog.info("🤖 Attempting Gemini label extraction...")
+
+        Task {
+            do {
+                let result = try await LabelExtractionService.shared.extractFields(
+                    image: image,
+                    ocrText: rawOCRText,
+                    category: recognition.category,
+                    brand: recognition.brand
+                )
+
+                await MainActor.run {
+                    ocrLog.info("🤖 Gemini extraction succeeded:")
+                    ocrLog.info("   model: \(result.modelNumber ?? "(nil)")")
+                    ocrLog.info("   serial: \(result.serialNumber ?? "(nil)")")
+                    ocrLog.info("   manufacturer: \(result.manufacturer ?? "(nil)")")
+                    ocrLog.info("   brand: \(result.brand ?? "(nil)")")
+                    ocrLog.info("   confidence: \(String(format: "%.0f%%", result.confidence * 100))")
+
+                    // Populate fields from Gemini result
+                    extractionSource = "gemini"
+                    geminiFields = result.toOCRFields(rawText: rawOCRText)
+
+                    if let model = result.modelNumber, !model.isEmpty {
+                        detectedModel = model
+                    }
+                    if let serial = result.serialNumber, !serial.isEmpty {
+                        detectedSerial = serial
+                    }
+                    if let mfr = result.manufacturer, !mfr.isEmpty {
+                        detectedManufacturer = mfr
+                    }
+
+                    isProcessing = false
+                }
+            } catch {
+                await MainActor.run {
+                    ocrLog.warning("🤖 Gemini extraction failed: \(error.localizedDescription)")
+                    ocrLog.info("📝 Falling back to heuristic parsing...")
+
+                    // Fall back to heuristic parsing
+                    extractionSource = "heuristic"
+                    geminiFields = nil
+                    parseFields(from: ocrLines)
+                    isProcessing = false
+                }
+            }
+        }
+    }
+
+    private func resetCapture() {
+        capturedImage = nil
+        detectedModel = ""
+        detectedSerial = ""
+        detectedManufacturer = ""
+        rawOCRText = ""
+        errorMessage = nil
+        extractionSource = "heuristic"
+        geminiFields = nil
+        processingStage = "Reading label..."
+    }
+    
+    private func submitResult() {
+        // Use Gemini-extracted fields if available, otherwise build from detected values
+        let ocrFields: OCRFields
+        if let geminiFields {
+            // Gemini fields already have full structure; override with any user edits
+            var fields = geminiFields
+            if !detectedModel.isEmpty {
+                fields.modelNumber = OCRField(text: detectedModel, confidence: geminiFields.modelNumber?.confidence ?? 0.8)
+            }
+            if !detectedSerial.isEmpty {
+                fields.serialNumber = OCRField(text: detectedSerial, confidence: geminiFields.serialNumber?.confidence ?? 0.8)
+            }
+            ocrFields = fields
+        } else {
+            ocrFields = OCRFields(
+                modelNumber: detectedModel.isEmpty ? nil : OCRField(text: detectedModel),
+                serialNumber: detectedSerial.isEmpty ? nil : OCRField(text: detectedSerial),
+                manufacturer: detectedManufacturer.isEmpty ? nil : OCRField(text: detectedManufacturer),
+                rawText: rawOCRText.isEmpty ? nil : rawOCRText
+            )
+        }
+
+        let result = LabelScanResult(
+            labelImage: capturedImage ?? UIImage(),
+            ocrFields: ocrFields,
+            labelLocationSource: .pending,
+            extractionSource: extractionSource
+        )
+
+        onComplete(result)
+    }
+}
+
+
+// ===== Sources/AssetKit/Models/LabelLocation.swift =====
+import Foundation
+import CastleMindrModels
+
+/// Location where the appliance label was found (user selection)
+public enum LabelLocation: String, CaseIterable, Codable, Sendable, Equatable {
+    // Door locations
+    case insideLeftDoor = "inside_left_door"
+    case insideRightDoor = "inside_right_door"
+    case insideDoor = "inside_door"               // Generic inside door (dryers, ovens)
+
+    // Frame & edges
+    case insideFrame = "inside_frame"              // Door frame opening (washers, dishwashers)
+    case topEdge = "top_edge"
+    case bottomEdge = "bottom_edge"
+    case underside = "underside"                   // Flipped upside down / underneath
+
+    // Panels
+    case backPanel = "back_panel"
+    case sideLeft = "side_left"
+    case sideRight = "side_right"
+    case frontPanel = "front_panel"                // Near controls (water heaters, HVAC)
+    case behindAccessPanel = "behind_access_panel" // Must remove cover
+
+    // Specific areas
+    case underLid = "under_lid"                    // Top-loader washers, chest freezers
+    case drawerFront = "drawer_front"
+    case nearControls = "near_controls"            // Near knobs/buttons
+    case nearFilter = "near_filter"                // HVAC filter slot area
+    case nearPipes = "near_pipes"                  // Water heater pipe connections
+    case onCompressor = "on_compressor"            // Fridge/AC compressor
+    case insideCabinet = "inside_cabinet"          // Built-in appliances
+
+    // Catch-all
+    case other = "other"
+
+    /// Human-readable display name
+    public var displayName: String {
+        switch self {
+        case .insideLeftDoor: return "Inside Left Door"
+        case .insideRightDoor: return "Inside Right Door"
+        case .insideDoor: return "Inside Door"
+        case .insideFrame: return "Inside Frame"
+        case .topEdge: return "Top Edge"
+        case .bottomEdge: return "Bottom Edge"
+        case .underside: return "Underside"
+        case .backPanel: return "Back Panel"
+        case .sideLeft: return "Left Side"
+        case .sideRight: return "Right Side"
+        case .frontPanel: return "Front Panel"
+        case .behindAccessPanel: return "Behind Access Panel"
+        case .underLid: return "Under Lid"
+        case .drawerFront: return "Drawer Front"
+        case .nearControls: return "Near Controls"
+        case .nearFilter: return "Near Filter"
+        case .nearPipes: return "Near Pipes"
+        case .onCompressor: return "On Compressor"
+        case .insideCabinet: return "Inside Cabinet"
+        case .other: return "Other"
+        }
+    }
+
+    /// SF Symbol icon for picker
+    public var iconName: String {
+        switch self {
+        case .insideLeftDoor: return "door.left.hand.open"
+        case .insideRightDoor: return "door.right.hand.open"
+        case .insideDoor: return "door.left.hand.open"
+        case .insideFrame: return "rectangle.inset.filled"
+        case .topEdge: return "rectangle.tophalf.filled"
+        case .bottomEdge: return "rectangle.bottomhalf.filled"
+        case .underside: return "arrow.turn.right.down"
+        case .backPanel: return "rectangle.portrait"
+        case .sideLeft: return "rectangle.lefthalf.filled"
+        case .sideRight: return "rectangle.righthalf.filled"
+        case .frontPanel: return "rectangle.portrait.fill"
+        case .behindAccessPanel: return "rectangle.badge.minus"
+        case .underLid: return "menubar.arrow.up.rectangle"
+        case .drawerFront: return "tray"
+        case .nearControls: return "slider.horizontal.3"
+        case .nearFilter: return "aqi.medium"
+        case .nearPipes: return "pipe.and.drop"
+        case .onCompressor: return "gearshape"
+        case .insideCabinet: return "cabinet.fill"
+        case .other: return "questionmark.square"
+        }
+    }
+
+    /// Common locations filtered by appliance category (shown first in picker)
+    public static func commonLocations(for category: ApplianceCategory) -> [LabelLocation] {
+        switch category {
+        case .refrigerator:
+            return [.insideLeftDoor, .insideRightDoor, .backPanel, .sideLeft, .onCompressor]
+        case .washer:
+            return [.insideFrame, .backPanel, .underLid, .topEdge, .sideLeft]
+        case .dryer:
+            return [.insideFrame, .insideDoor, .backPanel, .topEdge, .sideLeft]
+        case .dishwasher:
+            return [.insideFrame, .insideDoor, .sideLeft, .sideRight, .topEdge]
+        case .oven, .microwave:
+            return [.insideFrame, .insideDoor, .backPanel, .sideLeft, .nearControls]
+        case .hvac:
+            return [.behindAccessPanel, .sideLeft, .sideRight, .nearFilter, .frontPanel]
+        case .waterHeater:
+            return [.frontPanel, .sideLeft, .sideRight, .nearPipes, .backPanel]
+        default:
+            return [.backPanel, .sideLeft, .sideRight, .insideFrame, .frontPanel]
+        }
+    }
+
+    /// All remaining locations not in the common set for a category
+    public static func additionalLocations(for category: ApplianceCategory) -> [LabelLocation] {
+        let common = Set(commonLocations(for: category))
+        return allCases.filter { $0 != .other && !common.contains($0) }
+    }
+}
+
+
+// ===== Sources/AssetKit/Models/RecognitionResult.swift =====
+//
+//  RecognitionResult.swift
+//  AssetKit
+//
+//  Created by Jim Bergren on 1/23/26.
+//
+
+import Foundation
+import UIKit
+import CastleMindrModels
+
+/// Result from appliance recognition (API or on-device)
+public struct RecognitionResult: Equatable {
+    public let category: ApplianceCategory
+    public let brand: String?
+    public let manufacturer: String?
+    public let confidence: Double
+    public let capturedImage: UIImage?
+
+    /// Normalized bounding box (0-1) of the item within the captured image
+    /// Used for training data to identify exactly what the user selected
+    public let boundingBox: CGRect?
+
+    /// Error message if recognition failed (from API)
+    public let error: String?
+
+    public init(
+        category: ApplianceCategory,
+        brand: String? = nil,
+        manufacturer: String? = nil,
+        confidence: Double,
+        capturedImage: UIImage? = nil,
+        boundingBox: CGRect? = nil,
+        error: String? = nil
+    ) {
+        self.category = category
+        self.brand = brand
+        self.manufacturer = manufacturer
+        self.confidence = confidence
+        self.capturedImage = capturedImage
+        self.boundingBox = boundingBox
+        self.error = error
+    }
+
+    /// Whether this is a successful recognition (not unknown, no error, confidence > 0.5)
+    public var isSuccessful: Bool {
+        category != .unknown && error == nil && confidence > 0.5
+    }
+
+    // Equatable - ignore images for comparison
+    public static func == (lhs: RecognitionResult, rhs: RecognitionResult) -> Bool {
+        lhs.category == rhs.category &&
+        lhs.brand == rhs.brand &&
+        lhs.manufacturer == rhs.manufacturer &&
+        lhs.confidence == rhs.confidence &&
+        lhs.boundingBox == rhs.boundingBox &&
+        lhs.error == rhs.error
+    }
+}
+
+// MARK: - API Response (for decoding JSON)
+
+/// Internal struct for decoding API response
+struct RecognitionAPIResponse: Codable {
+    let category: String
+    let manufacturer: String?
+    let confidence: Double
+    let error: String?
+    
+    func toResult(with image: UIImage?) -> RecognitionResult {
+        RecognitionResult(
+            category: ApplianceCategory(rawValue: category),
+            brand: manufacturer,  // API returns brand name in "manufacturer" field
+            confidence: confidence,
+            capturedImage: image,
+            error: error
+        )
+    }
+}
+
+
+// ===== Sources/AssetKit/Models/TrainingSample.swift =====
+//
+//  TrainingSample.swift
+//  AssetKit
+//
+//  Created by Jim Bergren on 1/24/26.
+//
+
+import Foundation
+import UIKit
+import CastleMindrModels
+
+/// Training sample captured during asset creation flow
+/// Submitted to backend for ML model training
+public struct TrainingSample: Codable {
+
+    // MARK: - Identification
+
+    /// Unique ID for this sample
+    public let id: String
+
+    /// Timestamp of capture
+    public let createdAt: Date
+
+    // MARK: - Recognition Data (user-verified)
+
+    /// Confirmed category (user-verified)
+    public let category: String
+
+    /// Confirmed brand (user-verified, e.g. "Maytag")
+    public let brand: String?
+
+    /// Confirmed manufacturer (user-verified, e.g. "Whirlpool Corporation")
+    public let manufacturer: String?
+
+    // MARK: - AI Interaction
+
+    /// What the AI predicted
+    public let aiPredictedCategory: String
+
+    /// AI's brand prediction (from recognition API)
+    public let aiPredictedBrand: String?
+
+    /// AI's manufacturer prediction (legacy, may be nil)
+    public let aiPredictedManufacturer: String?
+
+    /// AI confidence score (0-1)
+    public let aiConfidence: Double
+
+    /// Whether cloud API was used (vs on-device)
+    public let wasCloudUsed: Bool
+
+    /// User corrected the AI's category prediction
+    public let userCorrectedCategory: Bool
+
+    /// User corrected the AI's brand prediction
+    public let userCorrectedBrand: Bool
+
+    /// User corrected the AI's manufacturer prediction
+    public let userCorrectedManufacturer: Bool
+
+    // MARK: - Item Bounding Box
+
+    /// Normalized bounding box (0-1) of the item within the captured image
+    /// This is where the user drew the selection box
+    public let itemBoundingBox: BoundingBoxDTO?
+
+    // MARK: - Label Data
+
+    /// Where the label was located
+    public let labelLocation: String?
+
+    /// How location was determined
+    public let labelLocationSource: String  // user_selected, inferred, skipped
+
+    /// Free-text description when user selected "Other" (for analyzing new location categories)
+    public let customLocationDescription: String?
+
+    /// OCR-extracted fields with bounding boxes
+    public let ocrFields: OCRFieldsDTO?
+
+    /// Raw OCR text
+    public let ocrRawText: String?
+
+    // MARK: - User-Corrected OCR Fields (ground truth for ML training)
+
+    /// The model number the user confirmed/edited in the form
+    public let userFinalModelNumber: String?
+
+    /// The serial number the user confirmed/edited in the form
+    public let userFinalSerialNumber: String?
+
+    /// The manufacturer the user confirmed/edited in the form (from label context)
+    public let userFinalManufacturer: String?
+
+    /// The brand the user confirmed/edited in the form
+    public let userFinalBrand: String?
+
+    /// Whether user changed the OCR-extracted model number
+    public let userCorrectedModelNumber: Bool
+
+    /// Whether user changed the OCR-extracted serial number
+    public let userCorrectedSerialNumber: Bool
+
+    /// Whether user changed the OCR-extracted manufacturer (from label, not AI)
+    public let userCorrectedOCRManufacturer: Bool
+
+    /// Source of label extraction: "gemini", "heuristic", or nil
+    public let labelExtractionSource: String?
+
+    // MARK: - Device Context
+
+    /// Device model (e.g., "iPhone 15 Pro")
+    public let deviceModel: String
+
+    /// iOS version
+    public let osVersion: String
+
+    /// App version
+    public let appVersion: String
+
+    // MARK: - Init
+
+    public init(
+        id: String = UUID().uuidString,
+        createdAt: Date = Date(),
+        category: String,
+        brand: String? = nil,
+        manufacturer: String? = nil,
+        aiPredictedCategory: String,
+        aiPredictedBrand: String? = nil,
+        aiPredictedManufacturer: String? = nil,
+        aiConfidence: Double,
+        wasCloudUsed: Bool,
+        userCorrectedCategory: Bool,
+        userCorrectedBrand: Bool = false,
+        userCorrectedManufacturer: Bool,
+        itemBoundingBox: BoundingBoxDTO?,
+        labelLocation: String?,
+        labelLocationSource: String,
+        customLocationDescription: String? = nil,
+        ocrFields: OCRFieldsDTO?,
+        ocrRawText: String?,
+        userFinalModelNumber: String? = nil,
+        userFinalSerialNumber: String? = nil,
+        userFinalManufacturer: String? = nil,
+        userFinalBrand: String? = nil,
+        userCorrectedModelNumber: Bool = false,
+        userCorrectedSerialNumber: Bool = false,
+        userCorrectedOCRManufacturer: Bool = false,
+        labelExtractionSource: String? = nil,
+        deviceModel: String,
+        osVersion: String,
+        appVersion: String
+    ) {
+        self.id = id
+        self.createdAt = createdAt
+        self.category = category
+        self.brand = brand
+        self.manufacturer = manufacturer
+        self.aiPredictedCategory = aiPredictedCategory
+        self.aiPredictedBrand = aiPredictedBrand
+        self.aiPredictedManufacturer = aiPredictedManufacturer
+        self.aiConfidence = aiConfidence
+        self.wasCloudUsed = wasCloudUsed
+        self.userCorrectedCategory = userCorrectedCategory
+        self.userCorrectedBrand = userCorrectedBrand
+        self.userCorrectedManufacturer = userCorrectedManufacturer
+        self.itemBoundingBox = itemBoundingBox
+        self.labelLocation = labelLocation
+        self.labelLocationSource = labelLocationSource
+        self.customLocationDescription = customLocationDescription
+        self.ocrFields = ocrFields
+        self.ocrRawText = ocrRawText
+        self.userFinalModelNumber = userFinalModelNumber
+        self.userFinalSerialNumber = userFinalSerialNumber
+        self.userFinalManufacturer = userFinalManufacturer
+        self.userFinalBrand = userFinalBrand
+        self.userCorrectedModelNumber = userCorrectedModelNumber
+        self.userCorrectedSerialNumber = userCorrectedSerialNumber
+        self.userCorrectedOCRManufacturer = userCorrectedOCRManufacturer
+        self.labelExtractionSource = labelExtractionSource
+        self.deviceModel = deviceModel
+        self.osVersion = osVersion
+        self.appVersion = appVersion
+    }
+}
+
+// MARK: - OCR Fields DTO (for JSON encoding)
+
+public struct OCRFieldsDTO: Codable {
+    public let modelNumber: OCRFieldDTO?
+    public let serialNumber: OCRFieldDTO?
+    public let brand: OCRFieldDTO?
+    public let manufacturer: OCRFieldDTO?
+    public let manufactureDate: OCRFieldDTO?
+    public let voltage: OCRFieldDTO?
+    public let wattage: OCRFieldDTO?
+
+    public init(from ocrFields: OCRFields) {
+        self.modelNumber = ocrFields.modelNumber.map { OCRFieldDTO(from: $0) }
+        self.serialNumber = ocrFields.serialNumber.map { OCRFieldDTO(from: $0) }
+        self.brand = ocrFields.brand.map { OCRFieldDTO(from: $0) }
+        self.manufacturer = ocrFields.manufacturer.map { OCRFieldDTO(from: $0) }
+        self.manufactureDate = ocrFields.manufactureDate.map { OCRFieldDTO(from: $0) }
+        self.voltage = ocrFields.voltage.map { OCRFieldDTO(from: $0) }
+        self.wattage = ocrFields.wattage.map { OCRFieldDTO(from: $0) }
+    }
+}
+
+public struct OCRFieldDTO: Codable {
+    public let text: String
+    public let confidence: Double
+    public let boundingBox: BoundingBoxDTO?
+
+    public init(from field: OCRField) {
+        self.text = field.text
+        self.confidence = field.confidence
+        self.boundingBox = field.boundingBox.map { BoundingBoxDTO(from: $0) }
+    }
+}
+
+public struct BoundingBoxDTO: Codable {
+    public let x: Double
+    public let y: Double
+    public let width: Double
+    public let height: Double
+
+    public init(from rect: CGRect) {
+        self.x = rect.origin.x
+        self.y = rect.origin.y
+        self.width = rect.size.width
+        self.height = rect.size.height
+    }
+
+    public init(x: Double, y: Double, width: Double, height: Double) {
+        self.x = x
+        self.y = y
+        self.width = width
+        self.height = height
+    }
+}
+
+// MARK: - Builder
+
+extension TrainingSample {
+
+    /// Build training sample from capture flow data
+    public static func build(
+        recognition: RecognitionResult,
+        confirmedCategory: ApplianceCategory,
+        confirmedBrand: String?,
+        confirmedManufacturer: String?,
+        labelScan: LabelScanResult?,
+        userFinalModelNumber: String? = nil,
+        userFinalSerialNumber: String? = nil,
+        userFinalManufacturer: String? = nil,
+        userFinalBrand: String? = nil,
+        labelExtractionSource: String? = nil
+    ) -> TrainingSample {
+
+        let deviceInfo = DeviceInfo.current
+
+        // Compare OCR-extracted values with user's final values to detect corrections
+        let ocrModel = labelScan?.ocrFields.modelNumber?.text
+        let ocrSerial = labelScan?.ocrFields.serialNumber?.text
+        let ocrManufacturer = labelScan?.ocrFields.manufacturer?.text
+
+        let correctedModel = (ocrModel != nil || userFinalModelNumber != nil)
+            && ocrModel != userFinalModelNumber
+        let correctedSerial = (ocrSerial != nil || userFinalSerialNumber != nil)
+            && ocrSerial != userFinalSerialNumber
+        let correctedOCRMfr = (ocrManufacturer != nil || userFinalManufacturer != nil)
+            && ocrManufacturer != userFinalManufacturer
+
+        return TrainingSample(
+            category: confirmedCategory.rawValue,
+            brand: confirmedBrand,
+            manufacturer: confirmedManufacturer,
+            aiPredictedCategory: recognition.category.rawValue,
+            aiPredictedBrand: recognition.brand,
+            aiPredictedManufacturer: recognition.manufacturer,
+            aiConfidence: recognition.confidence,
+            wasCloudUsed: true,  // For now, always cloud
+            userCorrectedCategory: recognition.category != confirmedCategory,
+            userCorrectedBrand: recognition.brand != confirmedBrand,
+            userCorrectedManufacturer: recognition.manufacturer != confirmedManufacturer,
+            itemBoundingBox: recognition.boundingBox.map { BoundingBoxDTO(from: $0) },
+            labelLocation: labelScan?.labelLocation?.rawValue,
+            labelLocationSource: labelScan?.labelLocationSource.rawValue ?? "skipped",
+            customLocationDescription: labelScan?.customLocationDescription,
+            ocrFields: labelScan.map { OCRFieldsDTO(from: $0.ocrFields) },
+            ocrRawText: labelScan?.ocrFields.rawText,
+            userFinalModelNumber: userFinalModelNumber,
+            userFinalSerialNumber: userFinalSerialNumber,
+            userFinalManufacturer: userFinalManufacturer,
+            userFinalBrand: userFinalBrand,
+            userCorrectedModelNumber: correctedModel,
+            userCorrectedSerialNumber: correctedSerial,
+            userCorrectedOCRManufacturer: correctedOCRMfr,
+            labelExtractionSource: labelExtractionSource,
+            deviceModel: deviceInfo.model,
+            osVersion: deviceInfo.osVersion,
+            appVersion: deviceInfo.appVersion
+        )
+    }
+}
+
+// MARK: - Device Info Helper
+
+private struct DeviceInfo {
+    let model: String
+    let osVersion: String
+    let appVersion: String
+
+    static var current: DeviceInfo {
+        var systemInfo = utsname()
+        uname(&systemInfo)
+        let machineMirror = Mirror(reflecting: systemInfo.machine)
+        let model = machineMirror.children.reduce("") { identifier, element in
+            guard let value = element.value as? Int8, value != 0 else { return identifier }
+            return identifier + String(UnicodeScalar(UInt8(value)))
+        }
+
+        let osVersion = ProcessInfo.processInfo.operatingSystemVersionString
+        let appVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "unknown"
+
+        return DeviceInfo(model: model, osVersion: osVersion, appVersion: appVersion)
+    }
+}
+
+
+// ===== Sources/AssetKit/Models/LabelScanResult.swift =====
+//
+//  LabelScanResult.swift
+//  AssetKit
+//
+//  Created by Jim Bergren on 1/24/26.
+//
+
+import Foundation
+import UIKit
+
+/// Field extracted from OCR with optional bounding box for training
+public struct OCRField: Codable, Sendable, Equatable {
+    public let text: String
+    public let confidence: Double
+    public let boundingBox: CGRect?  // Normalized 0-1 coordinates for training
+    
+    public init(text: String, confidence: Double = 1.0, boundingBox: CGRect? = nil) {
+        self.text = text
+        self.confidence = confidence
+        self.boundingBox = boundingBox
+    }
+    
+    // Custom Codable for CGRect
+    enum CodingKeys: String, CodingKey {
+        case text, confidence, boundingBox
+    }
+    
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        text = try container.decode(String.self, forKey: .text)
+        confidence = try container.decode(Double.self, forKey: .confidence)
+        if let boxDict = try container.decodeIfPresent([String: Double].self, forKey: .boundingBox) {
+            boundingBox = CGRect(
+                x: boxDict["x"] ?? 0,
+                y: boxDict["y"] ?? 0,
+                width: boxDict["width"] ?? 0,
+                height: boxDict["height"] ?? 0
+            )
+        } else {
+            boundingBox = nil
+        }
+    }
+    
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(text, forKey: .text)
+        try container.encode(confidence, forKey: .confidence)
+        if let box = boundingBox {
+            let boxDict: [String: Double] = [
+                "x": box.origin.x,
+                "y": box.origin.y,
+                "width": box.size.width,
+                "height": box.size.height
+            ]
+            try container.encode(boxDict, forKey: .boundingBox)
+        }
+    }
+}
+
+/// Collection of OCR-extracted fields from a label scan
+public struct OCRFields: Codable, Sendable, Equatable {
+    public var modelNumber: OCRField?
+    public var serialNumber: OCRField?
+    public var brand: OCRField?
+    public var manufacturer: OCRField?
+    public var manufactureDate: OCRField?
+    public var voltage: OCRField?
+    public var wattage: OCRField?
+
+    /// Raw OCR text for training/debugging
+    public var rawText: String?
+
+    public init(
+        modelNumber: OCRField? = nil,
+        serialNumber: OCRField? = nil,
+        brand: OCRField? = nil,
+        manufacturer: OCRField? = nil,
+        manufactureDate: OCRField? = nil,
+        voltage: OCRField? = nil,
+        wattage: OCRField? = nil,
+        rawText: String? = nil
+    ) {
+        self.modelNumber = modelNumber
+        self.serialNumber = serialNumber
+        self.brand = brand
+        self.manufacturer = manufacturer
+        self.manufactureDate = manufactureDate
+        self.voltage = voltage
+        self.wattage = wattage
+        self.rawText = rawText
+    }
+    
+    /// Check if minimum required fields are captured
+    public var hasMinimumData: Bool {
+        modelNumber != nil || serialNumber != nil
+    }
+}
+
+/// Result from the guided label scan flow
+public struct LabelScanResult: Equatable {
+    public let labelImage: UIImage
+    public let ocrFields: OCRFields
+    public var labelLocation: LabelLocation?
+    public let labelLocationSource: LabelLocationSource
+    public let extractionSource: String  // "gemini" or "heuristic"
+    /// Free-text description when user selects "Other" — collected for training data analysis
+    public var customLocationDescription: String?
+
+    public init(
+        labelImage: UIImage,
+        ocrFields: OCRFields,
+        labelLocation: LabelLocation? = nil,
+        labelLocationSource: LabelLocationSource = .pending,
+        extractionSource: String = "heuristic",
+        customLocationDescription: String? = nil
+    ) {
+        self.labelImage = labelImage
+        self.ocrFields = ocrFields
+        self.labelLocation = labelLocation
+        self.labelLocationSource = labelLocationSource
+        self.extractionSource = extractionSource
+        self.customLocationDescription = customLocationDescription
+    }
+}
+
+/// How the label location was determined
+public enum LabelLocationSource: String, Codable, Sendable {
+    case userSelected = "user_selected"   // User picked from list
+    case inferred = "inferred"             // AI/heuristics guessed
+    case skipped = "skipped"               // User skipped, enough data exists
+    case pending = "pending"               // Not yet determined
+}
+
+
+// ===== Sources/AssetKit/Knowledge/ApplianceKnowledge.swift =====
+//
+//  ApplianceKnowledge.swift
+//  AssetKit
+//
+//  Created by Jim Bergren on 1/23/26.
+//
+//
+
+import Foundation
+import CastleMindrModels
+
+// MARK: - Label Location Hint (guidance for where to look)
+
+public struct LabelLocationHint: Codable, Sendable {
+    public let position: String
+    public let instructions: String
+    public let probability: Double
+    
+    public init(position: String, instructions: String, probability: Double) {
+        self.position = position
+        self.instructions = instructions
+        self.probability = probability
+    }
+}
+
+// MARK: - Field Pattern
+
+public struct FieldPattern: Codable, Sendable {
+    public let fieldName: String
+    public let regex: String
+    public let labelHints: [String]
+    
+    public init(fieldName: String, regex: String, labelHints: [String]) {
+        self.fieldName = fieldName
+        self.regex = regex
+        self.labelHints = labelHints
+    }
+}
+
+// MARK: - Category Knowledge
+
+public struct CategoryKnowledge: Codable, Identifiable, Sendable {
+    public var id: String { category.rawValue }
+    public let category: ApplianceCategory
+    public let displayName: String
+    public let icon: String?
+    public let commonManufacturers: [String]
+    public let labelLocations: [LabelLocationHint]
+    public let fieldPatterns: [FieldPattern]
+    
+    public init(
+        category: ApplianceCategory,
+        displayName: String,
+        icon: String? = nil,
+        commonManufacturers: [String] = [],
+        labelLocations: [LabelLocationHint] = [],
+        fieldPatterns: [FieldPattern] = []
+    ) {
+        self.category = category
+        self.displayName = displayName
+        self.icon = icon
+        self.commonManufacturers = commonManufacturers
+        self.labelLocations = labelLocations
+        self.fieldPatterns = fieldPatterns
+    }
+}
+
+// MARK: - Manufacturer Knowledge
+
+public struct ManufacturerKnowledge: Codable, Identifiable, Sendable {
+    public var id: String { name.lowercased() }
+    public let name: String
+    public let categories: [String: ManufacturerCategoryOverride]
+    
+    public init(name: String, categories: [String: ManufacturerCategoryOverride] = [:]) {
+        self.name = name
+        self.categories = categories
+    }
+    
+    public func override(for category: ApplianceCategory) -> ManufacturerCategoryOverride? {
+        categories[category.rawValue]
+    }
+}
+
+public struct ManufacturerCategoryOverride: Codable, Sendable {
+    public let labelLocations: [LabelLocationHint]?
+    public let modelPattern: String?
+    public let serialPattern: String?
+    
+    public init(
+        labelLocations: [LabelLocationHint]? = nil,
+        modelPattern: String? = nil,
+        serialPattern: String? = nil
+    ) {
+        self.labelLocations = labelLocations
+        self.modelPattern = modelPattern
+        self.serialPattern = serialPattern
+    }
+}
+
+// MARK: - Knowledge Provider Protocol
+
+public protocol KnowledgeProvider: Sendable {
+    func fetchCategories() async throws -> [CategoryKnowledge]
+    func fetchManufacturers() async throws -> [ManufacturerKnowledge]
+}
+
+// MARK: - Knowledge Base
+
+@MainActor
+public final class ApplianceKnowledgeBase: ObservableObject {
+    
+    @Published public private(set) var categories: [ApplianceCategory: CategoryKnowledge] = [:]
+    @Published public private(set) var manufacturers: [String: ManufacturerKnowledge] = [:]
+    @Published public private(set) var isLoaded = false
+    
+    private let provider: KnowledgeProvider
+    
+    public init(provider: KnowledgeProvider) {
+        self.provider = provider
+    }
+    
+    // MARK: - Loading
+    
+    public func loadIfNeeded() async {
+        guard !isLoaded else { return }
+        
+        do {
+            let fetchedCategories = try await provider.fetchCategories()
+            let fetchedManufacturers = try await provider.fetchManufacturers()
+            
+            self.categories = Dictionary(uniqueKeysWithValues: fetchedCategories.map { ($0.category, $0) })
+            self.manufacturers = Dictionary(uniqueKeysWithValues: fetchedManufacturers.map { ($0.id, $0) })
+            self.isLoaded = true
+        } catch {
+            print("Failed to load appliance knowledge: \(error)")
+        }
+    }
+    
+    // MARK: - Lookup
+    
+    public func knowledge(for category: ApplianceCategory) -> CategoryKnowledge? {
+        categories[category]
+    }
+    
+    public func knowledge(for manufacturerName: String) -> ManufacturerKnowledge? {
+        manufacturers[manufacturerName.lowercased()]
+    }
+    
+    public func allCategories() -> [CategoryKnowledge] {
+        Array(categories.values)
+    }
+    
+    public func labelLocationHints(for category: ApplianceCategory, manufacturer: String? = nil) -> [LabelLocationHint] {
+        // Check for manufacturer-specific override first
+        if let mfr = manufacturer,
+           let mfrKnowledge = knowledge(for: mfr),
+           let override = mfrKnowledge.override(for: category),
+           let locations = override.labelLocations {
+            return locations
+        }
+        
+        // Fall back to category default
+        return knowledge(for: category)?.labelLocations ?? []
+    }
+    
+    public func guidancePrompt(for category: ApplianceCategory, manufacturer: String? = nil) -> String {
+        let hints = labelLocationHints(for: category, manufacturer: manufacturer)
+        guard let topHint = hints.first else {
+            return "Look for a label with model and serial number information."
+        }
+        return topHint.instructions
+    }
+}
+
+
+
+// ===== Sources/AssetKit/Knowledge/BundledKnowledgeProvider.swift =====
+//
+//  BundledKnowledgeProvider.swift
+//  AssetKit
+//
+//  Created by Jim Bergren on 1/23/26.
+//
+
+import Foundation
+import CastleMindrModels
+
+/// Provides bundled seed data for offline use
+public struct BundledKnowledgeProvider: KnowledgeProvider {
+    
+    public init() {}
+    
+    public func fetchCategories() async throws -> [CategoryKnowledge] {
+        [
+            CategoryKnowledge(
+                category: .refrigerator,
+                displayName: "Refrigerator",
+                icon: "refrigerator.fill",
+                commonManufacturers: ["samsung", "lg", "whirlpool", "ge", "frigidaire", "kitchenaid"],
+                labelLocations: [
+                    LabelLocationHint(position: LabelLocation.insideLeftDoor.rawValue, instructions: "Open the refrigerator door and look on the inside wall, usually on the left side near the top.", probability: 0.55),
+                    LabelLocationHint(position: LabelLocation.insideRightDoor.rawValue, instructions: "Open the refrigerator door and look on the inside wall on the right side.", probability: 0.20),
+                    LabelLocationHint(position: LabelLocation.backPanel.rawValue, instructions: "Check the back of the refrigerator near the bottom.", probability: 0.10),
+                    LabelLocationHint(position: LabelLocation.sideLeft.rawValue, instructions: "Check the left side panel of the refrigerator.", probability: 0.05),
+                    LabelLocationHint(position: LabelLocation.onCompressor.rawValue, instructions: "Look on or near the compressor at the back bottom of the unit.", probability: 0.10)
+                ],
+                fieldPatterns: [
+                    FieldPattern(fieldName: "model", regex: "^[A-Z]{2,4}[0-9]{2,5}[A-Z0-9]*$", labelHints: ["Model", "Model No", "MOD"]),
+                    FieldPattern(fieldName: "serial", regex: "^[A-Z0-9]{10,20}$", labelHints: ["Serial", "S/N", "SER"])
+                ]
+            ),
+            CategoryKnowledge(
+                category: .washer,
+                displayName: "Washing Machine",
+                icon: "washer.fill",
+                commonManufacturers: ["samsung", "lg", "whirlpool", "ge", "maytag", "speed queen"],
+                labelLocations: [
+                    LabelLocationHint(position: LabelLocation.insideFrame.rawValue, instructions: "Open the washer door and look around the door frame opening.", probability: 0.50),
+                    LabelLocationHint(position: LabelLocation.backPanel.rawValue, instructions: "Check the back panel of the washer.", probability: 0.20),
+                    LabelLocationHint(position: LabelLocation.underLid.rawValue, instructions: "For top-loaders, lift the lid and check underneath.", probability: 0.15),
+                    LabelLocationHint(position: LabelLocation.topEdge.rawValue, instructions: "Check the top edge of the washer opening.", probability: 0.10),
+                    LabelLocationHint(position: LabelLocation.sideLeft.rawValue, instructions: "Check the left side panel.", probability: 0.05)
+                ],
+                fieldPatterns: [
+                    FieldPattern(fieldName: "model", regex: "^[A-Z]{2,4}[0-9]{3,5}[A-Z0-9]*$", labelHints: ["Model", "Model No", "MOD"]),
+                    FieldPattern(fieldName: "serial", regex: "^[A-Z0-9]{8,16}$", labelHints: ["Serial", "S/N", "SER"])
+                ]
+            ),
+            CategoryKnowledge(
+                category: .dryer,
+                displayName: "Dryer",
+                icon: "dryer.fill",
+                commonManufacturers: ["samsung", "lg", "whirlpool", "ge", "maytag", "speed queen"],
+                labelLocations: [
+                    LabelLocationHint(position: LabelLocation.insideFrame.rawValue, instructions: "Open the door and look on the inside of the door frame.", probability: 0.45),
+                    LabelLocationHint(position: LabelLocation.insideDoor.rawValue, instructions: "Look on the inside of the door itself.", probability: 0.15),
+                    LabelLocationHint(position: LabelLocation.backPanel.rawValue, instructions: "Check the back panel of the unit.", probability: 0.25),
+                    LabelLocationHint(position: LabelLocation.topEdge.rawValue, instructions: "Check the top edge near the lint filter area.", probability: 0.10),
+                    LabelLocationHint(position: LabelLocation.sideLeft.rawValue, instructions: "Check the left side panel.", probability: 0.05)
+                ],
+                fieldPatterns: [
+                    FieldPattern(fieldName: "model", regex: "^[A-Z]{2,4}[0-9]{3,5}[A-Z0-9]*$", labelHints: ["Model", "Model No", "MOD"]),
+                    FieldPattern(fieldName: "serial", regex: "^[A-Z0-9]{8,16}$", labelHints: ["Serial", "S/N", "SER"])
+                ]
+            ),
+            CategoryKnowledge(
+                category: .hvac,
+                displayName: "HVAC System",
+                icon: "air.conditioner.horizontal.fill",
+                commonManufacturers: ["carrier", "trane", "lennox", "rheem", "goodman", "american standard"],
+                labelLocations: [
+                    LabelLocationHint(position: LabelLocation.behindAccessPanel.rawValue, instructions: "Open the access panel on the unit.", probability: 0.50),
+                    LabelLocationHint(position: LabelLocation.sideLeft.rawValue, instructions: "Check the side panel near the electrical connections.", probability: 0.15),
+                    LabelLocationHint(position: LabelLocation.sideRight.rawValue, instructions: "Check the right side panel.", probability: 0.15),
+                    LabelLocationHint(position: LabelLocation.nearFilter.rawValue, instructions: "Look near the filter slot area.", probability: 0.10),
+                    LabelLocationHint(position: LabelLocation.frontPanel.rawValue, instructions: "Check the front panel near the controls.", probability: 0.10)
+                ],
+                fieldPatterns: [
+                    FieldPattern(fieldName: "model", regex: "^[A-Z0-9]{6,15}$", labelHints: ["Model", "M/N", "MOD"]),
+                    FieldPattern(fieldName: "serial", regex: "^[A-Z0-9]{8,20}$", labelHints: ["Serial", "S/N", "SER"])
+                ]
+            ),
+            CategoryKnowledge(
+                category: .waterHeater,
+                displayName: "Water Heater",
+                icon: "flame.fill",
+                commonManufacturers: ["rheem", "ao smith", "bradford white", "state", "whirlpool"],
+                labelLocations: [
+                    LabelLocationHint(position: LabelLocation.frontPanel.rawValue, instructions: "Look on the front of the unit near the controls.", probability: 0.60),
+                    LabelLocationHint(position: LabelLocation.sideLeft.rawValue, instructions: "Check the left side of the tank.", probability: 0.15),
+                    LabelLocationHint(position: LabelLocation.sideRight.rawValue, instructions: "Check the right side of the tank.", probability: 0.10),
+                    LabelLocationHint(position: LabelLocation.nearPipes.rawValue, instructions: "Look near where the pipes connect at the top.", probability: 0.10),
+                    LabelLocationHint(position: LabelLocation.backPanel.rawValue, instructions: "Check the back of the unit.", probability: 0.05)
+                ],
+                fieldPatterns: [
+                    FieldPattern(fieldName: "model", regex: "^[A-Z0-9\\-]{6,20}$", labelHints: ["Model", "M/N", "MOD"]),
+                    FieldPattern(fieldName: "serial", regex: "^[A-Z0-9]{8,16}$", labelHints: ["Serial", "S/N", "SER"]),
+                    FieldPattern(fieldName: "capacity", regex: "^[0-9]{2,3}\\s*(gal|GAL|gallon)?$", labelHints: ["Capacity", "Gallons", "GAL"])
+                ]
+            )
+        ]
+    }
+    
+    public func fetchManufacturers() async throws -> [ManufacturerKnowledge] {
+        [
+            ManufacturerKnowledge(
+                name: "Samsung",
+                categories: [
+                    "refrigerator": ManufacturerCategoryOverride(
+                        modelPattern: "^RF[0-9]{2}[A-Z][0-9]{4}[A-Z]{2,3}$",
+                        serialPattern: "^[A-Z0-9]{11,15}$"
+                    ),
+                    "washer": ManufacturerCategoryOverride(
+                        modelPattern: "^WF[0-9]{2}[A-Z][0-9]{4}[A-Z]{2}$"
+                    )
+                ]
+            ),
+            ManufacturerKnowledge(
+                name: "LG",
+                categories: [
+                    "refrigerator": ManufacturerCategoryOverride(
+                        modelPattern: "^L[A-Z]{2,3}[0-9]{4,5}[A-Z]{1,2}$"
+                    )
+                ]
+            ),
+            ManufacturerKnowledge(
+                name: "Whirlpool",
+                categories: [
+                    "refrigerator": ManufacturerCategoryOverride(
+                        modelPattern: "^W[A-Z]{2}[0-9]{5}[A-Z]{2,3}$"
+                    ),
+                    "washer": ManufacturerCategoryOverride(
+                        modelPattern: "^W[A-Z]{2}[0-9]{4,5}[A-Z]{2}$"
+                    )
+                ]
+            )
+        ]
+    }
+}
+
+
+// ===== Sources/AssetKit/Services/LabelExtractionService.swift =====
+//
+//  LabelExtractionService.swift
+//  AssetKit
+//
+//  Created by Jim Bergren on 2/15/26.
+//
+
+import Foundation
+import UIKit
+import CastleMindrModels
+
+// MARK: - Label Extraction Service
+
+/// Service for extracting structured fields from appliance label images
+/// via Cloud Function + Gemini Vision. Falls back to heuristic parsing on failure.
+public actor LabelExtractionService {
+
+    // MARK: - Configuration
+
+    private let endpoint: URL
+    private let maxImageDimension: CGFloat
+    private let jpegQuality: CGFloat
+    private let timeoutInterval: TimeInterval
+
+    // MARK: - Singleton
+
+    public static let shared = LabelExtractionService()
+
+    // MARK: - Init
+
+    public init(
+        endpoint: URL = URL(string: "https://us-central1-chateau-3e605.cloudfunctions.net/extract_label_fields")!,
+        maxImageDimension: CGFloat = 1024,
+        jpegQuality: CGFloat = 0.80,
+        timeoutInterval: TimeInterval = 30
+    ) {
+        self.endpoint = endpoint
+        self.maxImageDimension = maxImageDimension
+        self.jpegQuality = jpegQuality
+        self.timeoutInterval = timeoutInterval
+    }
+
+    // MARK: - Public API
+
+    /// Extract structured fields from a label image using Gemini
+    /// - Parameters:
+    ///   - image: The label photo (UIImage)
+    ///   - ocrText: Raw OCR text from Vision framework (provides additional context)
+    ///   - category: The appliance category (helps Gemini understand field formats)
+    ///   - brand: The brand detected during recognition (helps disambiguate manufacturer vs brand)
+    /// - Returns: LabelExtractionResult with parsed fields and confidence
+    public func extractFields(
+        image: UIImage,
+        ocrText: String?,
+        category: ApplianceCategory,
+        brand: String?
+    ) async throws -> LabelExtractionResult {
+        // 1. Prepare image
+        guard let imageData = prepareImage(image) else {
+            throw LabelExtractionError.imageProcessingFailed
+        }
+
+        let base64String = imageData.base64EncodedString()
+
+        // 2. Build request body
+        var body: [String: Any] = [
+            "image_base64": base64String,
+            "appliance_category": category.rawValue
+        ]
+
+        if let ocrText, !ocrText.isEmpty {
+            body["ocr_text"] = ocrText
+        }
+
+        if let brand, !brand.isEmpty {
+            body["brand"] = brand
+        }
+
+        // 3. Build HTTP request
+        var request = URLRequest(url: endpoint)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.timeoutInterval = timeoutInterval
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+
+        // 4. Send request
+        let (data, response) = try await URLSession.shared.data(for: request)
+
+        // 5. Validate response
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw LabelExtractionError.invalidResponse
+        }
+
+        guard httpResponse.statusCode == 200 else {
+            if let errorJson = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+               let errorMessage = errorJson["error"] as? String {
+                throw LabelExtractionError.serverError(errorMessage)
+            }
+            throw LabelExtractionError.httpError(httpResponse.statusCode)
+        }
+
+        // 6. Parse response
+        let apiResponse = try JSONDecoder().decode(LabelExtractionAPIResponse.self, from: data)
+        return apiResponse.toResult()
+    }
+
+    // MARK: - Image Processing
+
+    private func prepareImage(_ image: UIImage) -> Data? {
+        let resized = image.resized(toFit: maxImageDimension)
+        return resized.jpegData(compressionQuality: jpegQuality)
+    }
+}
+
+// MARK: - Extraction Result
+
+/// Structured result from Gemini label extraction
+public struct LabelExtractionResult {
+    public let modelNumber: String?
+    public let serialNumber: String?
+    public let manufacturer: String?
+    public let brand: String?
+    public let manufactureDate: String?
+    public let voltage: String?
+    public let wattage: String?
+    public let typeCode: String?
+    public let additionalNotes: String?
+    public let confidence: Double
+
+    /// Convert to OCRFields for downstream consumption (zero changes needed in the rest of the pipeline)
+    public func toOCRFields(rawText: String?) -> OCRFields {
+        OCRFields(
+            modelNumber: modelNumber.map { OCRField(text: $0, confidence: confidence) },
+            serialNumber: serialNumber.map { OCRField(text: $0, confidence: confidence) },
+            brand: brand.map { OCRField(text: $0, confidence: confidence) },
+            manufacturer: manufacturer.map { OCRField(text: $0, confidence: confidence) },
+            manufactureDate: manufactureDate.map { OCRField(text: $0, confidence: confidence) },
+            voltage: voltage.map { OCRField(text: $0, confidence: confidence) },
+            wattage: wattage.map { OCRField(text: $0, confidence: confidence) },
+            rawText: rawText
+        )
+    }
+}
+
+// MARK: - API Response (for decoding JSON)
+
+/// Internal struct for decoding the Cloud Function response
+struct LabelExtractionAPIResponse: Codable {
+    let modelNumber: String?
+    let serialNumber: String?
+    let manufacturer: String?
+    let brand: String?
+    let manufactureDate: String?
+    let voltage: String?
+    let wattage: String?
+    let typeCode: String?
+    let additionalNotes: String?
+    let confidence: Double?
+
+    enum CodingKeys: String, CodingKey {
+        case modelNumber = "model_number"
+        case serialNumber = "serial_number"
+        case manufacturer
+        case brand
+        case manufactureDate = "manufacture_date"
+        case voltage
+        case wattage
+        case typeCode = "type_code"
+        case additionalNotes = "additional_notes"
+        case confidence
+    }
+
+    func toResult() -> LabelExtractionResult {
+        LabelExtractionResult(
+            modelNumber: modelNumber,
+            serialNumber: serialNumber,
+            manufacturer: manufacturer,
+            brand: brand,
+            manufactureDate: manufactureDate,
+            voltage: voltage,
+            wattage: wattage,
+            typeCode: typeCode,
+            additionalNotes: additionalNotes,
+            confidence: confidence ?? 0.8
+        )
+    }
+}
+
+// MARK: - Errors
+
+public enum LabelExtractionError: LocalizedError {
+    case imageProcessingFailed
+    case invalidResponse
+    case httpError(Int)
+    case serverError(String)
+
+    public var errorDescription: String? {
+        switch self {
+        case .imageProcessingFailed:
+            return "Failed to process label image for upload"
+        case .invalidResponse:
+            return "Invalid response from label extraction service"
+        case .httpError(let code):
+            return "Label extraction server returned error code \(code)"
+        case .serverError(let message):
+            return message
+        }
+    }
+}
+
+
+// ===== Sources/AssetKit/Services/TrainingSampleService.swift =====
+import Foundation
+import UIKit
+
+/// Service to submit training samples to the backend
+public actor TrainingSampleService {
+    
+    private let endpoint: URL
+    private let maxImageDimension: CGFloat
+    private let jpegQuality: CGFloat
+    private let timeoutInterval: TimeInterval
+    
+    public static let shared = TrainingSampleService()
+    
+    public init(
+        endpoint: URL = URL(string: "https://us-central1-chateau-3e605.cloudfunctions.net/submit_training_sample")!,
+        maxImageDimension: CGFloat = 1024,
+        jpegQuality: CGFloat = 0.75,
+        timeoutInterval: TimeInterval = 60
+    ) {
+        self.endpoint = endpoint
+        self.maxImageDimension = maxImageDimension
+        self.jpegQuality = jpegQuality
+        self.timeoutInterval = timeoutInterval
+    }
+    
+    // MARK: - Public API
+    
+    /// Submit a training sample with images
+    public func submit(
+        sample: TrainingSample,
+        applianceImage: UIImage?,
+        labelImage: UIImage?
+    ) async throws -> SubmitResult {
+        
+        // Build request body
+        var body: [String: Any] = encodeSample(sample)
+        
+        if let applianceImage {
+            body["applianceImageBase64"] = encodeImage(applianceImage)
+        }
+        
+        if let labelImage {
+            body["labelImageBase64"] = encodeImage(labelImage)
+        }
+        
+        // Build request
+        var request = URLRequest(url: endpoint)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.timeoutInterval = timeoutInterval
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        
+        // Send
+        let (data, response) = try await URLSession.shared.data(for: request)
+        
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw TrainingSampleError.invalidResponse
+        }
+        
+        guard httpResponse.statusCode == 200 else {
+            if let errorJson = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+               let errorMessage = errorJson["error"] as? String {
+                throw TrainingSampleError.serverError(errorMessage)
+            }
+            throw TrainingSampleError.httpError(httpResponse.statusCode)
+        }
+        
+        // Parse response
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let sampleId = json["sampleId"] as? String else {
+            throw TrainingSampleError.invalidResponse
+        }
+        
+        return SubmitResult(
+            sampleId: sampleId,
+            applianceImageUrl: json["applianceImageUrl"] as? String,
+            labelImageUrl: json["labelImageUrl"] as? String
+        )
+    }
+    
+    // MARK: - Encoding
+    
+    private func encodeSample(_ sample: TrainingSample) -> [String: Any] {
+        var dict: [String: Any] = [
+            "id": sample.id,
+            "createdAt": ISO8601DateFormatter().string(from: sample.createdAt),
+            "category": sample.category,
+            "aiPredictedCategory": sample.aiPredictedCategory,
+            "aiConfidence": sample.aiConfidence,
+            "wasCloudUsed": sample.wasCloudUsed,
+            "userCorrectedCategory": sample.userCorrectedCategory,
+            "userCorrectedBrand": sample.userCorrectedBrand,
+            "userCorrectedManufacturer": sample.userCorrectedManufacturer,
+            "userCorrectedModelNumber": sample.userCorrectedModelNumber,
+            "userCorrectedSerialNumber": sample.userCorrectedSerialNumber,
+            "userCorrectedOCRManufacturer": sample.userCorrectedOCRManufacturer,
+            "labelLocationSource": sample.labelLocationSource,
+            "deviceModel": sample.deviceModel,
+            "osVersion": sample.osVersion,
+            "appVersion": sample.appVersion
+        ]
+
+        if let brand = sample.brand {
+            dict["brand"] = brand
+        }
+        if let manufacturer = sample.manufacturer {
+            dict["manufacturer"] = manufacturer
+        }
+        if let aiPredictedBrand = sample.aiPredictedBrand {
+            dict["aiPredictedBrand"] = aiPredictedBrand
+        }
+        if let aiPredictedManufacturer = sample.aiPredictedManufacturer {
+            dict["aiPredictedManufacturer"] = aiPredictedManufacturer
+        }
+        if let itemBoundingBox = sample.itemBoundingBox {
+            dict["itemBoundingBox"] = [
+                "x": itemBoundingBox.x,
+                "y": itemBoundingBox.y,
+                "width": itemBoundingBox.width,
+                "height": itemBoundingBox.height
+            ]
+        }
+        if let labelLocation = sample.labelLocation {
+            dict["labelLocation"] = labelLocation
+        }
+        if let customDesc = sample.customLocationDescription {
+            dict["customLocationDescription"] = customDesc
+        }
+        if let ocrRawText = sample.ocrRawText {
+            dict["ocrRawText"] = ocrRawText
+        }
+        if let ocrFields = sample.ocrFields {
+            dict["ocrFields"] = encodeOCRFields(ocrFields)
+        }
+        if let userFinalModel = sample.userFinalModelNumber {
+            dict["userFinalModelNumber"] = userFinalModel
+        }
+        if let userFinalSerial = sample.userFinalSerialNumber {
+            dict["userFinalSerialNumber"] = userFinalSerial
+        }
+        if let userFinalMfr = sample.userFinalManufacturer {
+            dict["userFinalManufacturer"] = userFinalMfr
+        }
+        if let userFinalBrand = sample.userFinalBrand {
+            dict["userFinalBrand"] = userFinalBrand
+        }
+        if let source = sample.labelExtractionSource {
+            dict["labelExtractionSource"] = source
+        }
+
+        return dict
+    }
+    
+    private func encodeOCRFields(_ fields: OCRFieldsDTO) -> [String: Any] {
+        var dict: [String: Any] = [:]
+
+        if let f = fields.modelNumber { dict["modelNumber"] = encodeOCRField(f) }
+        if let f = fields.serialNumber { dict["serialNumber"] = encodeOCRField(f) }
+        if let f = fields.brand { dict["brand"] = encodeOCRField(f) }
+        if let f = fields.manufacturer { dict["manufacturer"] = encodeOCRField(f) }
+        if let f = fields.manufactureDate { dict["manufactureDate"] = encodeOCRField(f) }
+        if let f = fields.voltage { dict["voltage"] = encodeOCRField(f) }
+        if let f = fields.wattage { dict["wattage"] = encodeOCRField(f) }
+
+        return dict
+    }
+    
+    private func encodeOCRField(_ field: OCRFieldDTO) -> [String: Any] {
+        var dict: [String: Any] = [
+            "text": field.text,
+            "confidence": field.confidence
+        ]
+        if let box = field.boundingBox {
+            dict["boundingBox"] = [
+                "x": box.x,
+                "y": box.y,
+                "width": box.width,
+                "height": box.height
+            ]
+        }
+        return dict
+    }
+    
+    private func encodeImage(_ image: UIImage) -> String? {
+        let resized = image.resized(toFit: maxImageDimension)
+        guard let data = resized.jpegData(compressionQuality: jpegQuality) else {
+            return nil
+        }
+        return data.base64EncodedString()
+    }
+}
+
+// MARK: - Result
+
+public struct SubmitResult: Sendable {
+    public let sampleId: String
+    public let applianceImageUrl: String?
+    public let labelImageUrl: String?
+}
+
+// MARK: - Errors
+
+public enum TrainingSampleError: LocalizedError {
+    case invalidResponse
+    case httpError(Int)
+    case serverError(String)
+    
+    public var errorDescription: String? {
+        switch self {
+        case .invalidResponse:
+            return "Invalid response from server"
+        case .httpError(let code):
+            return "Server returned error code \(code)"
+        case .serverError(let message):
+            return message
+        }
+    }
+}
+
+
+// ===== Sources/AssetKit/Services/RecognitionAPIService.swift =====
+import Foundation
+import UIKit
+import Foundation
+import UIKit
+
+// MARK: - Recognition API Service
+
+/// Service for recognizing appliances via Cloud Function + Gemini Vision
+public actor RecognitionAPIService {
+    
+    // MARK: - Configuration
+    
+    private let endpoint: URL
+    private let maxImageDimension: CGFloat
+    private let jpegQuality: CGFloat
+    private let timeoutInterval: TimeInterval
+    
+    // MARK: - Singleton
+    
+    public static let shared = RecognitionAPIService()
+    
+    // MARK: - Init
+    
+    public init(
+        endpoint: URL = URL(string: "https://us-central1-chateau-3e605.cloudfunctions.net/recognize_appliance")!,
+        maxImageDimension: CGFloat = 1024,
+        jpegQuality: CGFloat = 0.75,
+        timeoutInterval: TimeInterval = 30
+    ) {
+        self.endpoint = endpoint
+        self.maxImageDimension = maxImageDimension
+        self.jpegQuality = jpegQuality
+        self.timeoutInterval = timeoutInterval
+    }
+    
+    // MARK: - Public API
+    
+    /// Recognize an appliance from an image
+    /// - Parameter image: The UIImage to analyze
+    /// - Returns: RecognitionResult with category, manufacturer, confidence, and the original image
+    public func recognize(_ image: UIImage) async throws -> RecognitionResult {
+        // 1. Prepare image (resize + compress)
+        guard let imageData = prepareImage(image) else {
+            throw RecognitionError.imageProcessingFailed
+        }
+        
+        // 2. Encode to base64
+        let base64String = imageData.base64EncodedString()
+        
+        // 3. Build request
+        var request = URLRequest(url: endpoint)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.timeoutInterval = timeoutInterval
+        
+        let body = ["image_base64": base64String]
+        request.httpBody = try JSONEncoder().encode(body)
+        
+        // 4. Send request
+        let (data, response) = try await URLSession.shared.data(for: request)
+        
+        // 5. Validate response
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw RecognitionError.invalidResponse
+        }
+        
+        
+        
+        guard httpResponse.statusCode == 200 else {
+            // Try to parse error message
+            if let errorResponse = try? JSONDecoder().decode(RecognitionAPIResponse.self, from: data),
+               let errorMessage = errorResponse.error {
+                throw RecognitionError.serverError(errorMessage)
+            }
+            throw RecognitionError.httpError(httpResponse.statusCode)
+        }
+        
+        // 6. Parse result and attach original image
+        let apiResponse = try JSONDecoder().decode(RecognitionAPIResponse.self, from: data)
+        print("API Response: category=\(apiResponse.category), manufacturer=\(String(describing: apiResponse.manufacturer)), confidence=\(apiResponse.confidence)")
+        return apiResponse.toResult(with: image)
+    }
+    
+    // MARK: - Image Processing
+    
+    private func prepareImage(_ image: UIImage) -> Data? {
+        // Resize if needed
+        let resized = image.resized(toFit: maxImageDimension)
+        
+        // Convert to JPEG
+        return resized.jpegData(compressionQuality: jpegQuality)
+    }
+}
+
+// MARK: - Errors
+
+public enum RecognitionError: LocalizedError {
+    case imageProcessingFailed
+    case invalidResponse
+    case httpError(Int)
+    case serverError(String)
+    
+    public var errorDescription: String? {
+        switch self {
+        case .imageProcessingFailed:
+            return "Failed to process image for upload"
+        case .invalidResponse:
+            return "Invalid response from server"
+        case .httpError(let code):
+            return "Server returned error code \(code)"
+        case .serverError(let message):
+            return message
+        }
+    }
+}
+
+// MARK: - UIImage Extension
+
+extension UIImage {
+    /// Resize image to fit within maxDimension, preserving aspect ratio
+    func resized(toFit maxDimension: CGFloat) -> UIImage {
+        let currentMax = max(size.width, size.height)
+        
+        // No resize needed
+        guard currentMax > maxDimension else { return self }
+        
+        let scale = maxDimension / currentMax
+        let newSize = CGSize(
+            width: size.width * scale,
+            height: size.height * scale
+        )
+        
+        let renderer = UIGraphicsImageRenderer(size: newSize)
+        return renderer.image { _ in
+            draw(in: CGRect(origin: .zero, size: newSize))
+        }
+    }
+}
+
+

@@ -149,7 +149,7 @@ public struct ObjectRecognitionView: View {
 
                 // Record usage only after a successful Gemini call
                 GeminiUsageTracker.shared.recordUsage()
-                recognitionLog.info("✅ Gemini recognition used — \(GeminiUsageTracker.shared.todayCount)/\(GeminiUsageTracker.shared.dailyCap) today")
+                recognitionLog.info("✅ Gemini recognition used — remaining: \(GeminiUsageTracker.shared.remainingCount.map(String.init) ?? "unlimited")")
 
                 // Attach the full captured image (not cropped) for the asset
                 // but store bounding box info for training
@@ -165,6 +165,20 @@ public struct ObjectRecognitionView: View {
                 await MainActor.run {
                     isProcessing = false
                     onRecognized(result)
+                }
+            } catch RecognitionError.capReached {
+                // Cap hit server-side — fall through to manual selection
+                GeminiUsageTracker.shared.syncFromProfile(limit: 0, remaining: 0)
+                await MainActor.run {
+                    isProcessing = false
+                    let manual = RecognitionResult(
+                        category: "unknown",
+                        brand: nil,
+                        confidence: 0,
+                        capturedImage: capturedImage,
+                        boundingBox: boundingBox
+                    )
+                    onRecognized(manual)
                 }
             } catch {
                 await MainActor.run {
