@@ -24,6 +24,13 @@ public struct RecognitionResult: Equatable {
     /// Error message if recognition failed (from API)
     public let error: String?
 
+    /// Anonymous training-sample identifier returned by the FastAPI
+    /// `/assets/recognize/appliance` endpoint. Echo this back when saving
+    /// the resulting asset so the backend can write the human-correction
+    /// row in the training corpus. Nil when recognition was on-device or
+    /// the user has training-data contribution turned off.
+    public let sampleId: String?
+
     public init(
         category: String,
         brand: String? = nil,
@@ -31,7 +38,8 @@ public struct RecognitionResult: Equatable {
         confidence: Double,
         capturedImage: UIImage? = nil,
         boundingBox: CGRect? = nil,
-        error: String? = nil
+        error: String? = nil,
+        sampleId: String? = nil
     ) {
         self.category = category
         self.brand = brand
@@ -40,6 +48,7 @@ public struct RecognitionResult: Equatable {
         self.capturedImage = capturedImage
         self.boundingBox = boundingBox
         self.error = error
+        self.sampleId = sampleId
     }
 
     /// Whether this is a successful recognition (not unknown, no error, confidence > 0.5)
@@ -59,26 +68,41 @@ public struct RecognitionResult: Equatable {
         lhs.manufacturer == rhs.manufacturer &&
         lhs.confidence == rhs.confidence &&
         lhs.boundingBox == rhs.boundingBox &&
-        lhs.error == rhs.error
+        lhs.error == rhs.error &&
+        lhs.sampleId == rhs.sampleId
     }
 }
 
 // MARK: - API Response (for decoding JSON)
 
-/// Internal struct for decoding API response
-struct RecognitionAPIResponse: Codable {
-    let category: String
-    let manufacturer: String?
-    let confidence: Double
-    let error: String?
+/// Decodes the FastAPI `/assets/recognize/appliance` response shape.
+///
+///     {
+///       "sample_id": "uuid",
+///       "result": {"category": "...", "manufacturer": "...", "confidence": 0.87}
+///     }
+struct ApplianceRecognitionAPIResponse: Codable {
+    let sampleId: String
+    let result: Body
+
+    struct Body: Codable {
+        let category: String
+        let manufacturer: String?
+        let confidence: Double
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case sampleId = "sample_id"
+        case result
+    }
 
     func toResult(with image: UIImage?) -> RecognitionResult {
         RecognitionResult(
-            category: category,
-            brand: manufacturer,  // API returns brand name in "manufacturer" field
-            confidence: confidence,
+            category: result.category,
+            brand: result.manufacturer,
+            confidence: result.confidence,
             capturedImage: image,
-            error: error
+            sampleId: sampleId
         )
     }
 }

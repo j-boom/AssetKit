@@ -66,19 +66,25 @@ public actor RecognitionAPIService {
             throw RecognitionError.imageProcessingFailed
         }
 
-        // 2. Encode to base64
-        let base64String = imageData.base64EncodedString()
-
-        // 3. Build request to FastAPI proxy
-        let endpoint = baseURL.appendingPathComponent("cf/recognize")
+        // 2. Build request to FastAPI appliance-recognition endpoint
+        //    (multipart/form-data with the JPEG as an `image` file part).
+        let endpoint = baseURL.appendingPathComponent("assets/recognize/appliance")
         var request = URLRequest(url: endpoint)
         request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("Bearer \(authToken)", forHTTPHeaderField: "Authorization")
         request.timeoutInterval = timeoutInterval
 
-        let body = ["image_base64": base64String]
-        request.httpBody = try JSONEncoder().encode(body)
+        let boundary = "Boundary-\(UUID().uuidString)"
+        request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+
+        var body = Data()
+        body.append("--\(boundary)\r\n".data(using: .utf8)!)
+        body.append("Content-Disposition: form-data; name=\"image\"; filename=\"appliance.jpg\"\r\n".data(using: .utf8)!)
+        body.append("Content-Type: image/jpeg\r\n\r\n".data(using: .utf8)!)
+        body.append(imageData)
+        body.append("\r\n".data(using: .utf8)!)
+        body.append("--\(boundary)--\r\n".data(using: .utf8)!)
+        request.httpBody = body
 
         // 4. Send request
         let (data, response) = try await URLSession.shared.data(for: request)
@@ -95,17 +101,12 @@ public actor RecognitionAPIService {
                 }
                 throw RecognitionError.capReached
             }
-            // Try to parse error message
-            if let errorResponse = try? JSONDecoder().decode(RecognitionAPIResponse.self, from: data),
-               let errorMessage = errorResponse.error {
-                throw RecognitionError.serverError(errorMessage)
-            }
             throw RecognitionError.httpError(httpResponse.statusCode)
         }
 
         // 6. Parse result and attach original image
-        let apiResponse = try JSONDecoder().decode(RecognitionAPIResponse.self, from: data)
-        print("API Response: category=\(apiResponse.category), manufacturer=\(String(describing: apiResponse.manufacturer)), confidence=\(apiResponse.confidence)")
+        let apiResponse = try JSONDecoder().decode(ApplianceRecognitionAPIResponse.self, from: data)
+        print("API Response: category=\(apiResponse.result.category), manufacturer=\(String(describing: apiResponse.result.manufacturer)), confidence=\(apiResponse.result.confidence)")
         return apiResponse.toResult(with: image)
     }
 
